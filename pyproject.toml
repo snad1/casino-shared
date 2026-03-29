@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "casino-shared"
+version = "0.1.0"
+description = "Shared library for casino auto-betting bots"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "python-jose[cryptography]",
+    "psutil",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools]
+packages = [
+    "shared",
+    "shared.core",
+    "shared.web",
+    "shared.web.routes",
+    "shared.tg",
+]
+
+[tool.setuptools.package-dir]
+"shared" = "."
+"shared.core" = "core"
+"shared.web" = "web"
+"shared.web.routes" = "web/routes"
+"shared.tg" = "tg"
