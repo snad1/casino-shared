@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "casino-shared"
@@ -11,6 +11,7 @@ dependencies = [
     "fastapi",
     "python-jose[cryptography]",
     "psutil",
+    "jinja2",
 ]
 
 [project.optional-dependencies]
