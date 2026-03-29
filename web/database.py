@@ -2,7 +2,7 @@
 
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import hmac
 
@@ -89,7 +89,7 @@ def verify_admin(db_path: str, username: str, password: str) -> dict | None:
     if row and _verify_password(password, row["password_hash"]):
         conn.execute(
             "UPDATE admin_users SET last_login = ? WHERE id = ?",
-            (datetime.utcnow().isoformat(), row["id"]),
+            (datetime.now(timezone.utc).isoformat(), row["id"]),
         )
         conn.commit()
         conn.close()
@@ -120,7 +120,7 @@ def sync_tg_user(db_path: str, user_id: int, username: str = None, tier: str = N
     existing = conn.execute(
         "SELECT user_id FROM tg_users WHERE user_id = ?", (user_id,)
     ).fetchone()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     if existing:
         updates = ["last_active = ?"]
         params = [now]

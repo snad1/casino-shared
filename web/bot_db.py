@@ -48,7 +48,7 @@ def get_user_config(bot_data_dir: str, user_id: int) -> dict:
     try:
         with open(path) as f:
             return json.load(f)
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return {}
 
 
@@ -190,7 +190,7 @@ def get_bets_for_chart(bot_data_dir: str, db_filename: str,
         ts_str = row.get("timestamp") or ""
         try:
             ts_display = _dt.fromisoformat(ts_str.replace("Z", "+00:00")).strftime("%H:%M:%S")
-        except Exception:
+        except (ValueError, AttributeError):
             ts_display = ts_str
 
         if result_col and row.get(result_col):

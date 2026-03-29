@@ -33,7 +33,7 @@ def load_user_config(data_dir: str, user_id: int) -> dict:
     try:
         with open(path) as f:
             return json.load(f)
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return {}
 
 
@@ -51,7 +51,7 @@ def load_presets(data_dir: str, user_id: int) -> dict:
     try:
         with open(path) as f:
             return json.load(f)
-    except Exception:
+    except (json.JSONDecodeError, OSError):
         return {}
 
 

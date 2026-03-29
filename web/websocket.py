@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import WebSocket
@@ -37,7 +37,7 @@ class ConnectionManager:
         message = json.dumps({
             "type": msg_type,
             "data": data,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         async with self._lock:
             sockets = list(self._channels.get(channel, []))
@@ -45,7 +45,7 @@ class ConnectionManager:
         for ws in sockets:
             try:
                 await ws.send_text(message)
-            except Exception:
+            except (RuntimeError, ConnectionError, OSError):
                 dead.append(ws)
         for ws in dead:
             await self.disconnect(ws, channel)
@@ -54,7 +54,7 @@ class ConnectionManager:
         message = json.dumps({
             "type": msg_type,
             "data": data,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         await ws.send_text(message)
 

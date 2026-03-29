@@ -1,9 +1,13 @@
 """System service management — systemctl, git, metrics."""
 
 import asyncio
+import logging
 import os
+import shutil
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 
 # ── Standalone functions (no settings dependency) ────────
@@ -121,20 +125,27 @@ def make_services(settings, bot_main_file: str):
         install = settings.install_dir
         repo = settings.repo_dir
         if os.path.isdir(install) and os.path.isdir(repo):
-            copy_cmds = [
-                f"cp {repo}/{bot_main_file} {install}/{bot_main_file}",
-                f"cp {repo}/requirements.txt {install}/requirements.txt",
-                f"mkdir -p {install}/core {install}/tg",
-                f"cp {repo}/core/*.py {install}/core/",
-                f"cp {repo}/tg/*.py {install}/tg/",
-            ]
-            proc = await asyncio.create_subprocess_shell(
-                " && ".join(copy_cmds),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            results.append({"step": "copy_files", "code": proc.returncode,
-                            "stdout": stdout.decode(), "stderr": stderr.decode()})
+            try:
+                os.makedirs(os.path.join(install, "core"), exist_ok=True)
+                os.makedirs(os.path.join(install, "tg"), exist_ok=True)
+
+                import glob
+                copies = [
+                    (os.path.join(repo, bot_main_file), os.path.join(install, bot_main_file)),
+                    (os.path.join(repo, "requirements.txt"), os.path.join(install, "requirements.txt")),
+                ]
+                for src in glob.glob(os.path.join(repo, "core", "*.py")):
+                    copies.append((src, os.path.join(install, "core", os.path.basename(src))))
+                for src in glob.glob(os.path.join(repo, "tg", "*.py")):
+                    copies.append((src, os.path.join(install, "tg", os.path.basename(src))))
+
+                for src, dst in copies:
+                    shutil.copy2(src, dst)
+
+                results.append({"step": "copy_files", "code": 0, "stdout": f"Copied {len(copies)} files", "stderr": ""})
+            except OSError as e:
+                logger.error("Copy failed: %s", e)
+                results.append({"step": "copy_files", "code": 1, "stdout": "", "stderr": "File copy failed"})
 
         st = await service_status(settings.service_tg)
         if st["active"]:
