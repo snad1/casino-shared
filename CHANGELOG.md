@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.0 — pip Package Support (2026-03-29)
+
+### Infrastructure
+
+- **pyproject.toml** — Added proper package config for `pip install` from GitHub
+- **Build backend** — Fixed `setuptools.build_meta` (was broken `setuptools.backends._legacy`)
+- **Dependencies** — Added `jinja2` to package dependencies (required by `web.routes.auth_routes`)
+- **.gitignore** — Added `*.egg-info/`, `build/`, `dist/` for build artifacts
+
+---
+
 ## v1.0.0 — Initial Release (2026-03-29)
 
 ### Added
