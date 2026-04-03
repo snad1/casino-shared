@@ -84,6 +84,25 @@ def cleanup_old_bets(db_path: str, bet_age_days: int = 3):
     return deleted
 
 
+def cleanup_live_bets(db_path: str, bet_age_days: int = 1):
+    """Delete old bet rows from ALL sessions (including running ones).
+
+    Keeps bets newer than bet_age_days. Session stats are unaffected
+    because they're aggregated in the sessions table, not derived from bets.
+    Call periodically during long-running sessions to prevent DB bloat.
+    """
+    conn = sqlite3.connect(db_path, timeout=10)
+    deleted = conn.execute("""
+        DELETE FROM bets
+        WHERE timestamp < datetime('now', ?)
+    """, (f'-{bet_age_days} days',)).rowcount
+    conn.commit()
+    if deleted > 1000:
+        conn.execute("VACUUM")
+    conn.close()
+    return deleted
+
+
 def db_connect(db_path: str):
     """Create a WAL-mode connection to the database."""
     conn = sqlite3.connect(db_path, timeout=5)
