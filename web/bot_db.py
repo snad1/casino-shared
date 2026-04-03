@@ -209,6 +209,27 @@ def get_bets_for_chart(bot_data_dir: str, db_filename: str,
             "result": result_val,
             "ts": ts_display,
         })
+    # If no bets found, fall back to chart_snapshots from session row
+    if not result:
+        try:
+            conn2 = _connect_ro(bot_data_dir, db_filename, user_id)
+            snap_row = conn2.execute(
+                "SELECT chart_snapshots FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            conn2.close()
+            if snap_row and snap_row["chart_snapshots"]:
+                import json as _json
+                snapshots = _json.loads(snap_row["chart_snapshots"])
+                for s in snapshots:
+                    if len(s) >= 3:
+                        result.append({
+                            "time": s[0], "value": s[2], "bet_num": s[0],
+                            "amount": 0, "profit": s[1], "state": "",
+                            "target": 0, "result": "", "ts": "",
+                        })
+        except Exception:
+            pass
+
     return result
 
 
