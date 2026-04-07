@@ -94,7 +94,7 @@ def cleanup_live_bets(db_path: str, bet_age_days: int = 1):
     conn = sqlite3.connect(db_path, timeout=10)
     deleted = conn.execute("""
         DELETE FROM bets
-        WHERE timestamp < datetime('now', ?)
+        WHERE REPLACE(timestamp, 'T', ' ') < datetime('now', ?)
     """, (f'-{bet_age_days} days',)).rowcount
     conn.commit()
     if deleted > 1000:
