@@ -104,8 +104,13 @@ def cleanup_live_bets(db_path: str, bet_age_days: int = 1):
 
 
 def db_connect(db_path: str):
-    """Create a WAL-mode connection to the database."""
-    conn = sqlite3.connect(db_path, timeout=5)
+    """Create a WAL-mode connection to the database.
+
+    `check_same_thread=False` lets the connection be used from worker threads
+    (e.g. via asyncio.to_thread). Callers must serialize writes themselves
+    (each engine holds its own threading.Lock and never writes concurrently).
+    """
+    conn = sqlite3.connect(db_path, timeout=5, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
