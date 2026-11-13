@@ -36,9 +36,21 @@ CREATE TABLE IF NOT EXISTS sessions (
     peak_bps        REAL DEFAULT 0,
     low_bps         REAL DEFAULT 0,
     peak_bpm        REAL DEFAULT 0,
-    low_bpm         REAL DEFAULT 0
+    low_bpm         REAL DEFAULT 0,
+    lane            INTEGER DEFAULT 1
 )
 """
+
+
+def ensure_sessions_lane(conn) -> None:
+    """Add sessions.lane (parallel lanes, WolfBet v2.35.0) if it is missing.
+
+    Idempotent: guarded by PRAGMA table_info. Rows written before the column
+    existed read as lane 1 (DEFAULT 1). The caller owns the commit.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "lane" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN lane INTEGER DEFAULT 1")
 
 
 def cleanup_old_bets(db_path: str, bet_age_days: int = 3):

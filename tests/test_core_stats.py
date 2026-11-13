@@ -19,9 +19,7 @@ from shared.core.stats import (
 def _db(tmp_path, rows, lanes=None):
     """sqlite sessions table seeded with (started_at, ended_at) rows."""
     conn = sqlite3.connect(str(tmp_path / "stats.db"))
-    conn.execute(SESSIONS_SCHEMA)
-    if lanes is not None:
-        conn.execute("ALTER TABLE sessions ADD COLUMN lane INTEGER DEFAULT 1")
+    conn.execute(SESSIONS_SCHEMA)   # has sessions.lane since E1-S5
     for i, (started, ended) in enumerate(rows):
         conn.execute("INSERT INTO sessions (started_at, ended_at) VALUES (?, ?)",
                      (started, ended))
