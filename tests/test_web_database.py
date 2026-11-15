@@ -1,16 +1,19 @@
 """Tests for shared/web/database.py: admin users, sessions, audit."""
 
+import hashlib
 import sqlite3
 
 import pytest
 
 from shared.web.database import (
     DEFAULT_ADMIN_PASS,
-    _hash_password, _verify_password,
+    _hash_password, _verify_password, _needs_rehash,
     get_db, init_db, verify_admin, change_admin_password,
     sync_tg_user, get_tg_users, get_tg_user, update_tg_user,
     audit, get_audit_log,
     create_web_session, is_session_valid, revoke_session,
+    consume_login_token, login_locked_until, record_login_failure,
+    clear_login_failures,
 )
 
 
@@ -34,6 +37,40 @@ class TestPasswordHashing:
     def test_verify_invalid_format(self):
         assert _verify_password("pass", "garbage") is False
         assert _verify_password("pass", "") is False
+
+    def test_new_hash_carries_its_iteration_count(self):
+        assert _hash_password("mypassword").split(":")[1:3] == ["sha256", "600000"]
+
+    def test_legacy_hash_still_verifies(self):
+        salt = "abc123"
+        legacy = "pbkdf2:%s:%s" % (
+            salt,
+            hashlib.pbkdf2_hmac("sha256", b"mypassword", salt.encode(), 260_000).hex(),
+        )
+        assert _verify_password("mypassword", legacy) is True
+        assert _needs_rehash(legacy) is True
+
+    def test_current_hash_needs_no_rehash(self):
+        assert _needs_rehash(_hash_password("mypassword")) is False
+
+    def test_login_upgrades_a_legacy_hash(self, db):
+        salt = "abc123"
+        legacy = "pbkdf2:%s:%s" % (
+            salt,
+            hashlib.pbkdf2_hmac("sha256", b"testpass", salt.encode(), 260_000).hex(),
+        )
+        conn = get_db(db)
+        conn.execute("UPDATE admin_users SET password_hash = ? WHERE username = 'admin'", (legacy,))
+        conn.commit()
+        conn.close()
+
+        assert verify_admin(db, "admin", "testpass") is not None
+        conn = get_db(db)
+        stored = conn.execute(
+            "SELECT password_hash FROM admin_users WHERE username = 'admin'"
+        ).fetchone()["password_hash"]
+        conn.close()
+        assert _needs_rehash(stored) is False
 
 
 class TestInitDb:
@@ -199,3 +236,47 @@ class TestWebSessions:
 
     def test_nonexistent_session(self, db):
         assert is_session_valid(db, "fake-jti") is False
+
+
+class TestLoginTokens:
+    def test_consume_once(self, db):
+        assert consume_login_token(db, "link-1") is True
+        assert consume_login_token(db, "link-1") is False
+
+    def test_empty_jti_is_never_consumed(self, db):
+        assert consume_login_token(db, "") is False
+
+
+class TestLoginLockout:
+    def test_not_locked_below_the_threshold(self, db):
+        for _ in range(4):
+            assert record_login_failure(db, "ip|admin") is None
+        assert login_locked_until(db, "ip|admin") is None
+
+    def test_locks_at_the_threshold(self, db):
+        for _ in range(4):
+            record_login_failure(db, "ip|admin")
+        assert record_login_failure(db, "ip|admin") is not None
+        assert login_locked_until(db, "ip|admin") is not None
+
+    def test_clear_releases_the_lock(self, db):
+        for _ in range(5):
+            record_login_failure(db, "ip|admin")
+        clear_login_failures(db, "ip|admin")
+        assert login_locked_until(db, "ip|admin") is None
+        assert record_login_failure(db, "ip|admin") is None
+
+    def test_keys_are_independent(self, db):
+        for _ in range(5):
+            record_login_failure(db, "ip|admin")
+        assert login_locked_until(db, "other-ip|admin") is None
+
+    def test_expired_lock_lets_the_next_attempt_through(self, db):
+        conn = get_db(db)
+        conn.execute(
+            "INSERT INTO login_failures (key, count, first_at, locked_until) "
+            "VALUES ('ip|admin', 5, '2000-01-01T00:00:00+00:00', '2000-01-01T00:15:00+00:00')"
+        )
+        conn.commit()
+        conn.close()
+        assert login_locked_until(db, "ip|admin") is None

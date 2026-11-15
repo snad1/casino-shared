@@ -5,6 +5,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import WebSocket
 
@@ -76,10 +77,11 @@ manager = ConnectionManager()
 def make_authenticate_ws(decode_token_fn, cookie_name: str):
     """Create a WS authentication function bound to a specific auth config."""
     async def authenticate_ws(ws: WebSocket) -> Optional[dict]:
-        """Validate JWT from query param or cookie on WS connect."""
-        token = ws.query_params.get("token")
-        if not token:
-            token = ws.cookies.get(cookie_name)
+        """Authenticate the handshake from the cookie, refusing cross-origin browsers."""
+        origin = ws.headers.get("origin")
+        if origin and urlparse(origin).netloc != ws.headers.get("host", ""):
+            return None
+        token = ws.cookies.get(cookie_name)
         if not token:
             return None
         return decode_token_fn(token)

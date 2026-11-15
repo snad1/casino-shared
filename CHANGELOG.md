@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.3.2 - web auth and token hardening (2026-11-15)
+
+All six bots import `shared.web`, so this lands once for all of them. A bot opts into the lockout and one-time-link controls by passing the new callbacks to `make_auth_router`; without them its login keeps today's behaviour.
+
+### Authorization
+- `make_auth` now returns `require_user_access(user_id, request)`: admins pass, a Telegram user passes only when the token subject is `tg:<user_id>`, everything else is 403. The path parameter is resolved by FastAPI, so it drops into any `/api/users/{user_id}/...` route as `Depends(require_user_access)`.
+
+### Tokens
+- `decode_token` rejects a token with no `jti` whenever the session check is on. The Telegram link exchange calls it with the check off, so a link token still works, once.
+- `get_token_from_request` reads the cookie, then `Authorization: Bearer`; the `?token=` query parameter is no longer accepted. Query strings land in access logs and `Referer`.
+- `make_authenticate_ws` authenticates from the cookie only and refuses a handshake whose `Origin` host differs from the `Host` header. A missing `Origin` is allowed; browsers always send one on a WebSocket.
+
+### Login, logout, links
+- `POST /logout` with a double-submit `csrf_token` (cookie plus form field, compared with `hmac.compare_digest`). `GET /logout` answers 405.
+- Login sets a `csrf_token` cookie; both session cookies are `Secure` when `settings.app_env == "production"`, instead of depending on the request scheme behind the proxy.
+- `/auth/telegram` consumes the link's `jti` before issuing a session, so a 5-minute link opens exactly one.
+
+### Lockout
+- `login_locked_until`, `record_login_failure`, `clear_login_failures`: five failures for the same first forwarded hop and username lock that pair for 15 minutes, in the web database so it survives restarts and both workers. `X-Forwarded-For` is used because nginx is the only listener.
+
+### Passwords
+- PBKDF2 260k -> 600k, hash format `pbkdf2:sha256:<iters>:<salt>:<hash>`. Legacy three-field hashes still verify and `verify_admin` rehashes them on a successful login.
+- `used_login_tokens` and `login_failures` tables are created with `IF NOT EXISTS` on every `init_db`, so an existing install needs no migration.
+- `python-multipart` is now a declared dependency; the login form always required it.
+
+**Tests**: `tests/test_web_auth.py` (26), `tests/test_web_auth_routes.py` (8, new), `tests/test_web_database.py` (39). **395 total passing.**
+
 ## v0.3.1 — A stored shipped admin password is replaced at startup (2026-11-15)
 
 `init_db` seeded the admin row with `INSERT OR IGNORE`, so a bot installed before web credentials were hardened kept the shipped `changeme123` hash forever: a strong password in `.env` passed the startup check while the old password still logged in. `init_db` now replaces that stored hash with the configured password once, and only while the stored hash still matches the shipped default. A password the operator already chose is never touched.

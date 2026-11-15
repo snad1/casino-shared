@@ -1,4 +1,4 @@
-"""JWT authentication — admin + Telegram user support."""
+"""JWT authentication: admin and Telegram user support."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -29,7 +29,7 @@ def make_auth(secret_key: str, algorithm: str, expire_hours: int,
             payload = jwt.decode(token, secret_key, algorithms=[algorithm])
             if check_session:
                 jti = payload.get("jti")
-                if jti and not is_session_valid_fn(jti):
+                if not jti or not is_session_valid_fn(jti):
                     return None
             return payload
         except JWTError:
@@ -42,7 +42,7 @@ def make_auth(secret_key: str, algorithm: str, expire_hours: int,
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             return auth[7:]
-        return request.query_params.get("token")
+        return None
 
     def _get_payload(request: Request) -> dict:
         token = get_token_from_request(request)
@@ -74,6 +74,18 @@ def make_auth(secret_key: str, algorithm: str, expire_hours: int,
             return None
         return decode_token(token)
 
+    def require_user_access(user_id: int, request: Request) -> dict:
+        """Allow admins, and Telegram users only on their own user id."""
+        payload = _get_payload(request)
+        if payload.get("role") == "admin":
+            return payload
+        if payload.get("sub") != f"tg:{user_id}":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view your own data",
+            )
+        return payload
+
     return {
         "create_token": create_token,
         "decode_token": decode_token,
@@ -82,6 +94,7 @@ def make_auth(secret_key: str, algorithm: str, expire_hours: int,
         "get_current_tg_user": get_current_tg_user,
         "get_current_user": get_current_user,
         "get_optional_user": get_optional_user,
+        "require_user_access": require_user_access,
         "COOKIE_NAME": cookie_name,
         "revoke_session": revoke_session_fn,
     }

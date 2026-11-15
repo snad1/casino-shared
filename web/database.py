@@ -2,7 +2,7 @@
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 
@@ -42,6 +42,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action        TEXT NOT NULL,
     detail        TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS used_login_tokens (
+    jti           TEXT PRIMARY KEY,
+    used_at       TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS login_failures (
+    key           TEXT PRIMARY KEY,
+    count         INTEGER NOT NULL DEFAULT 0,
+    first_at      TEXT NOT NULL,
+    locked_until  TEXT
+);
 """
 
 _ALLOWED_TG_COLUMNS = {"username", "tier", "last_active", "is_blocked", "notes"}
@@ -50,20 +62,41 @@ _ALLOWED_TG_COLUMNS = {"username", "tier", "last_active", "is_blocked", "notes"}
 # only used to recognise (and replace) a hash an older install already stored.
 DEFAULT_ADMIN_PASS = "changeme123"
 
+_ITERATIONS = 600_000
+_LEGACY_ITERATIONS = 260_000
+
 
 def _hash_password(password: str) -> str:
     salt = uuid.uuid4().hex
-    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260_000)
-    return f"pbkdf2:{salt}:{h.hex()}"
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _ITERATIONS)
+    return f"pbkdf2:sha256:{_ITERATIONS}:{salt}:{h.hex()}"
+
+
+def _parse_hash(stored: str) -> tuple[int, str, str] | None:
+    """Return (iterations, salt, hash) for a current or legacy stored hash."""
+    parts = stored.split(":")
+    try:
+        if len(parts) == 5 and parts[0] == "pbkdf2" and parts[1] == "sha256":
+            return int(parts[2]), parts[3], parts[4]
+        if len(parts) == 3 and parts[0] == "pbkdf2":
+            return _LEGACY_ITERATIONS, parts[1], parts[2]
+    except ValueError:
+        return None
+    return None
 
 
 def _verify_password(password: str, stored: str) -> bool:
-    try:
-        _, salt, hash_hex = stored.split(":", 2)
-        h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260_000)
-        return hmac.compare_digest(h.hex(), hash_hex)
-    except (ValueError, AttributeError):
+    parsed = _parse_hash(stored)
+    if parsed is None:
         return False
+    iterations, salt, hash_hex = parsed
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations)
+    return hmac.compare_digest(h.hex(), hash_hex)
+
+
+def _needs_rehash(stored: str) -> bool:
+    parsed = _parse_hash(stored)
+    return parsed is None or parsed[0] < _ITERATIONS
 
 
 def get_db(db_path: str) -> sqlite3.Connection:
@@ -107,10 +140,13 @@ def verify_admin(db_path: str, username: str, password: str) -> dict | None:
         "SELECT * FROM admin_users WHERE username = ?", (username,)
     ).fetchone()
     if row and _verify_password(password, row["password_hash"]):
-        conn.execute(
-            "UPDATE admin_users SET last_login = ? WHERE id = ?",
-            (datetime.now(timezone.utc).isoformat(), row["id"]),
-        )
+        updates = ["last_login = ?"]
+        params = [datetime.now(timezone.utc).isoformat()]
+        if _needs_rehash(row["password_hash"]):
+            updates.append("password_hash = ?")
+            params.append(_hash_password(password))
+        params.append(row["id"])
+        conn.execute(f"UPDATE admin_users SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
         conn.close()
         return dict(row)
@@ -237,5 +273,70 @@ def is_session_valid(db_path: str, jti: str) -> bool:
 def revoke_session(db_path: str, jti: str):
     conn = get_db(db_path)
     conn.execute("UPDATE web_sessions SET revoked = 1 WHERE id = ?", (jti,))
+    conn.commit()
+    conn.close()
+
+
+def consume_login_token(db_path: str, jti: str) -> bool:
+    """Record a one-time login token; False when it was already exchanged."""
+    if not jti:
+        return False
+    conn = get_db(db_path)
+    cursor = conn.execute("INSERT OR IGNORE INTO used_login_tokens (jti) VALUES (?)", (jti,))
+    conn.commit()
+    consumed = cursor.rowcount == 1
+    conn.close()
+    return consumed
+
+
+def login_locked_until(db_path: str, key: str) -> str | None:
+    """ISO time the key stays locked, or None when it may try again."""
+    conn = get_db(db_path)
+    row = conn.execute(
+        "SELECT locked_until FROM login_failures WHERE key = ?", (key,)
+    ).fetchone()
+    conn.close()
+    if not row or not row["locked_until"]:
+        return None
+    if row["locked_until"] <= datetime.now(timezone.utc).isoformat():
+        return None
+    return row["locked_until"]
+
+
+def record_login_failure(db_path: str, key: str, max_attempts: int = 5,
+                         window_minutes: int = 15, lockout_minutes: int = 15) -> str | None:
+    """Count one failed attempt; return the lockout expiry once it is reached."""
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(minutes=window_minutes)).isoformat()
+    conn = get_db(db_path)
+    conn.execute("BEGIN IMMEDIATE")
+    row = conn.execute(
+        "SELECT count, first_at FROM login_failures WHERE key = ?", (key,)
+    ).fetchone()
+    if row is None or row["first_at"] < window_start:
+        count = 1
+        first_at = now.isoformat()
+    else:
+        count = row["count"] + 1
+        first_at = row["first_at"]
+    locked_until = (
+        (now + timedelta(minutes=lockout_minutes)).isoformat()
+        if count >= max_attempts
+        else None
+    )
+    conn.execute(
+        "INSERT INTO login_failures (key, count, first_at, locked_until) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET count = excluded.count, "
+        "first_at = excluded.first_at, locked_until = excluded.locked_until",
+        (key, count, first_at, locked_until),
+    )
+    conn.commit()
+    conn.close()
+    return locked_until
+
+
+def clear_login_failures(db_path: str, key: str):
+    conn = get_db(db_path)
+    conn.execute("DELETE FROM login_failures WHERE key = ?", (key,))
     conn.commit()
     conn.close()
