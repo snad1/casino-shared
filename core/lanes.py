@@ -105,16 +105,32 @@ def lane_config(cfg: dict, lane: int,
     """
     ov = lane_overrides(cfg, lane, forbidden)
     merged = {**cfg, **ov}
-    n = lanes_count(cfg)
-    if (split_bet_divisor(n, lane_split(cfg)) > 1 and "base_bet" not in ov
-            and isinstance(merged.get("base_bet"), (int, float))):
-        split = round(merged["base_bet"] / n, 8)
-        if split > 0:
-            merged["base_bet"] = split
-        else:
-            return merged, (f"lane split: base_bet {merged['base_bet']:.8f} ÷ {n} "
-                            f"rounds to 0 — using full bet")
+    if "base_bet" in merged:
+        merged["base_bet"], note = split_base_bet(
+            merged["base_bet"], lanes_count(cfg), lane_split(cfg), "base_bet" in ov)
+        return merged, note
     return merged, None
+
+
+def split_base_bet(base, lanes: int, mode: str, has_override: bool,
+                   min_bet: float = 0) -> Tuple[object, Optional[str]]:
+    """This lane's base bet under the bet split (v2.36.0) → (bet, note|None).
+
+    A lane's own base_bet override is never divided, and one lane (or a mode
+    without the bet split) is a no-op. A split bet that rounds to 0 or falls
+    below the service's minimum bet stays full; the note says why, for the
+    caller to log. Also used for a bet derived from basebet_pct.
+    """
+    n = split_bet_divisor(lanes, mode)
+    if has_override or n <= 1 or not isinstance(base, (int, float)):
+        return base, None
+    split = round(base / n, 8)
+    if split <= 0:
+        return base, f"lane split: base_bet {base:.8f} ÷ {n} rounds to 0 — using full bet"
+    if min_bet and split < min_bet:
+        return base, (f"lane split: base_bet {base:.8f} ÷ {n} = {split:.8f} is below "
+                      f"the minimum bet {min_bet:.8f} — using full bet")
+    return split, None
 
 
 def split_lane_pairs(pairs: List[str]) -> Tuple[List[str], dict, Optional[int], Optional[str]]:
