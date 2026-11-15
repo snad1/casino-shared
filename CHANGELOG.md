@@ -6,7 +6,7 @@ Pure helpers for WolfBet CLI v2.36.0 (lane money split) and v2.37.0 (run-wide pr
 
 ### Added
 
-- **core/lanes.py** — `split_base_bet(base, lanes, mode, has_override, min_bet=0) -> (bet, note|None)`: in `bet` / `both` divides the base bet (or a `basebet_pct`-derived bet) by the lane count. A lane's own `base_bet` override is never divided, and one lane is a no-op. A result that rounds to 0 or falls below the service's minimum bet stays full, with a note for the caller to log. `lane_config` now uses it, with the same output as before.
+- **core/lanes.py** — `split_base_bet(base, lanes, mode, has_override, min_bet=0) -> (bet, note|None)`: in `bet` / `both` divides the base bet (or a `basebet_pct`-derived bet) by the lane count. A lane's own `base_bet` override is never divided, and one lane is a no-op. A result that rounds to 0 or falls below the service's minimum bet stays full, with a note for the caller to log. `lane_config` now uses it, with the same output as before, and takes an optional `min_bet` (default 0 = no minimum) that it passes on, so a service's split base bet below its minimum stays full.
 - **core/run_increment.py** (new) — `PROFIT_INCREMENT_SCOPES`, `OFF_VALUES`, `parse_scope`, `increment_on`, `run_path` (per lane via `lane_path`), `load_run` (missing / corrupt file reads as `None`), `save_run` (atomic tmp + `os.replace`, mode `0o600`, raises `OSError` for the caller to log), `run_profit_done(conn, first_sid, exclude_sid=None, lane=None)`, `db_max_session_id(conn, lane=None)`, `run_is_stale`, `resume_base_bet`, `next_milestone`, `check_profit_increment` (the merged WolfBet `_check_profit_increment` rule: one bump per check)
 
 ### Unchanged on purpose

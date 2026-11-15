@@ -95,19 +95,21 @@ def split_bet_divisor(lanes: int, mode: str) -> int:
     return lanes if lanes > 1 and mode in ("bet", "both") else 1
 
 
-def lane_config(cfg: dict, lane: int,
-                forbidden: Iterable[str]) -> Tuple[dict, Optional[str]]:
+def lane_config(cfg: dict, lane: int, forbidden: Iterable[str],
+                min_bet: float = 0) -> Tuple[dict, Optional[str]]:
     """Base config + this lane's overrides + the bet split (v2.36.0).
 
     A lane with its own base_bet override keeps that exact value: the user
-    already sized it. A split bet that would round to 0 stays full, and the
-    second value is a warning for the caller to log (else None).
+    already sized it. A split bet that would round to 0 or fall below the
+    service's min_bet (0 = no minimum) stays full, and the second value is a
+    warning for the caller to log (else None).
     """
     ov = lane_overrides(cfg, lane, forbidden)
     merged = {**cfg, **ov}
     if "base_bet" in merged:
         merged["base_bet"], note = split_base_bet(
-            merged["base_bet"], lanes_count(cfg), lane_split(cfg), "base_bet" in ov)
+            merged["base_bet"], lanes_count(cfg), lane_split(cfg), "base_bet" in ov,
+            min_bet)
         return merged, note
     return merged, None
 
