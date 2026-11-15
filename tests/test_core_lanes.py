@@ -139,6 +139,19 @@ class TestLaneConfig:
         assert merged["base_bet"] == 0.00000001
         assert msg and "rounds to 0" in msg and "÷ 3" in msg
 
+    def test_below_min_bet_keeps_full(self):
+        cfg = _cfg({"count": 4, "split": "bet"})        # 0.0001 / 4 = 0.000025
+        merged, msg = lane_config(cfg, 2, FORBIDDEN, min_bet=0.00005)
+        assert merged["base_bet"] == 0.0001
+        assert msg and "below the minimum bet" in msg
+        merged, msg = lane_config(cfg, 2, FORBIDDEN, min_bet=0.00002)
+        assert merged["base_bet"] == pytest.approx(0.000025) and msg is None
+
+    def test_min_bet_ignores_override(self):
+        cfg = _cfg({"count": 2, "split": "bet", "overrides": {"2": {"base_bet": 0.00001}}})
+        merged, msg = lane_config(cfg, 2, FORBIDDEN, min_bet=0.001)
+        assert merged["base_bet"] == 0.00001 and msg is None
+
     def test_does_not_mutate_input(self):
         cfg = _cfg({"count": 2, "split": "bet"})
         lane_config(cfg, 2, FORBIDDEN)
