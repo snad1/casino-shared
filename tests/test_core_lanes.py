@@ -15,8 +15,8 @@ from shared.core.lanes import (
     LANE_BUDGET_REASON, LANE_SPLIT_HELP, LANE_SPLIT_MODES, LANE_UNSET_VALUES,
     LANES_MAX, check_lane_keys, lane_budget_exceeded, lane_config, lane_equity,
     lane_overrides, lane_path, lane_share, lane_split, lanes_count,
-    recommend_lanes, split_bet_divisor, split_budget_on, split_lane_pairs,
-    validate_lane,
+    recommend_lanes, split_base_bet, split_bet_divisor, split_budget_on,
+    split_lane_pairs, validate_lane,
 )
 from shared.core.stats import stats_date_window
 
@@ -143,6 +143,52 @@ class TestLaneConfig:
         cfg = _cfg({"count": 2, "split": "bet"})
         lane_config(cfg, 2, FORBIDDEN)
         assert cfg["base_bet"] == 0.0001
+
+
+class TestSplitBaseBet:
+    @pytest.mark.parametrize("mode,expected", [("none", 0.0001), ("budget", 0.0001),
+                                               ("bet", 0.00005), ("both", 0.00005)])
+    def test_modes(self, mode, expected):
+        bet, note = split_base_bet(0.0001, 2, mode, False)
+        assert bet == pytest.approx(expected) and note is None
+
+    def test_override_never_divided(self):
+        assert split_base_bet(0.0003, 2, "bet", True) == (0.0003, None)
+
+    def test_one_lane_no_op(self):
+        assert split_base_bet(0.0001, 1, "both", False) == (0.0001, None)
+
+    def test_rounding_to_zero_keeps_full(self):
+        bet, note = split_base_bet(0.00000001, 3, "bet", False)
+        assert bet == 0.00000001
+        assert "rounds to 0" in note and "÷ 3" in note
+
+    def test_below_min_bet_keeps_full(self):
+        bet, note = split_base_bet(0.0001, 4, "both", False, min_bet=0.00005)
+        assert bet == 0.0001
+        assert "below the minimum bet" in note and "0.00002500" in note
+
+    def test_at_min_bet_splits(self):
+        assert split_base_bet(0.0001, 2, "bet", False, min_bet=0.00005) == (0.00005, None)
+
+    def test_min_bet_ignored_without_split(self):
+        assert split_base_bet(0.0001, 2, "none", False, min_bet=1.0) == (0.0001, None)
+
+    def test_basebet_pct_derived_bet(self):
+        # WolfBet test_split_basebet_pct_divided: balance 10 × 0.001 ÷ 2 lanes
+        assert split_base_bet(10.0 * 0.001, 2, "bet", False)[0] == pytest.approx(0.005)
+        assert split_base_bet(10.0 * 0.001, 2, "none", False)[0] == pytest.approx(0.01)
+
+    @pytest.mark.parametrize("base", [None, "0.1"])
+    def test_non_number_untouched(self, base):
+        assert split_base_bet(base, 2, "bet", False) == (base, None)
+
+    def test_lane_config_uses_same_rule(self):
+        cfg = _cfg({"count": 4, "split": "both"}, base_bet=0.0001)
+        assert lane_config(cfg, 3, FORBIDDEN) == (
+            {**cfg, "base_bet": split_base_bet(0.0001, 4, "both", False)[0]}, None)
+        assert "base_bet" not in lane_config({"lanes": {"count": 2, "split": "bet"}},
+                                             2, FORBIDDEN)[0]
 
 
 class TestSplitLanePairs:
