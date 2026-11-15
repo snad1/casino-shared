@@ -1,10 +1,11 @@
-"""Tests for shared/web/database.py — admin users, sessions, audit."""
+"""Tests for shared/web/database.py: admin users, sessions, audit."""
 
 import sqlite3
 
 import pytest
 
 from shared.web.database import (
+    DEFAULT_ADMIN_PASS,
     _hash_password, _verify_password,
     get_db, init_db, verify_admin, change_admin_password,
     sync_tg_user, get_tg_users, get_tg_user, update_tg_user,
@@ -59,6 +60,29 @@ class TestInitDb:
         count = conn.execute("SELECT COUNT(*) FROM admin_users").fetchone()[0]
         conn.close()
         assert count == 1
+
+    def test_replaces_stored_shipped_password(self, tmp_db):
+        init_db(tmp_db, "admin", DEFAULT_ADMIN_PASS)
+        assert verify_admin(tmp_db, "admin", DEFAULT_ADMIN_PASS) is not None
+
+        init_db(tmp_db, "admin", "a-strong-operator-password")
+
+        assert verify_admin(tmp_db, "admin", DEFAULT_ADMIN_PASS) is None
+        assert verify_admin(tmp_db, "admin", "a-strong-operator-password") is not None
+
+    def test_keeps_a_password_already_chosen(self, tmp_db):
+        init_db(tmp_db, "admin", "a-strong-operator-password")
+
+        init_db(tmp_db, "admin", "another-configured-password")
+
+        assert verify_admin(tmp_db, "admin", "a-strong-operator-password") is not None
+        assert verify_admin(tmp_db, "admin", "another-configured-password") is None
+
+    def test_keeps_shipped_password_while_still_configured(self, tmp_db):
+        init_db(tmp_db, "admin", DEFAULT_ADMIN_PASS)
+        init_db(tmp_db, "admin", DEFAULT_ADMIN_PASS)
+
+        assert verify_admin(tmp_db, "admin", DEFAULT_ADMIN_PASS) is not None
 
 
 class TestVerifyAdmin:

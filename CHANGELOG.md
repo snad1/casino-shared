@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1 — A stored shipped admin password is replaced at startup (2026-11-15)
+
+`init_db` seeded the admin row with `INSERT OR IGNORE`, so a bot installed before web credentials were hardened kept the shipped `changeme123` hash forever: a strong password in `.env` passed the startup check while the old password still logged in. `init_db` now replaces that stored hash with the configured password once, and only while the stored hash still matches the shipped default. A password the operator already chose is never touched.
+
+**Tests:** `tests/test_web_database.py` (3).
+
 ## v0.3.0 — Lane split + run-wide profit increment helpers (2026-11-15)
 
 Pure helpers for WolfBet CLI v2.36.0 (lane money split) and v2.37.0 (run-wide profit increment, `0b7e71a`), used by the targets' E9 and E10 work. Existing functions keep their signatures and behaviour.
