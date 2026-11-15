@@ -1,4 +1,4 @@
-"""Web app's own SQLite database — admin users, sessions, audit log."""
+"""Web app's own SQLite database: admin users, sessions, audit log."""
 
 import sqlite3
 import uuid
@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 _ALLOWED_TG_COLUMNS = {"username", "tier", "last_active", "is_blocked", "notes"}
 
+# The password the installer shipped before credentials were hardened. It is
+# only used to recognise (and replace) a hash an older install already stored.
+DEFAULT_ADMIN_PASS = "changeme123"
+
 
 def _hash_password(password: str) -> str:
     salt = uuid.uuid4().hex
@@ -77,6 +81,22 @@ def init_db(db_path: str, admin_user: str, admin_pass: str):
         "INSERT OR IGNORE INTO admin_users (username, password_hash, role) VALUES (?, ?, ?)",
         (admin_user, _hash_password(admin_pass), "admin"),
     )
+    # The insert above is ignored once the row exists, so an install that
+    # predates credential hardening would keep the shipped password forever.
+    # Replace that stored hash only while it still matches the shipped default;
+    # a password the operator chose is never overwritten.
+    row = conn.execute(
+        "SELECT id, password_hash FROM admin_users WHERE username = ?", (admin_user,)
+    ).fetchone()
+    if (
+        row
+        and admin_pass != DEFAULT_ADMIN_PASS
+        and _verify_password(DEFAULT_ADMIN_PASS, row["password_hash"])
+    ):
+        conn.execute(
+            "UPDATE admin_users SET password_hash = ? WHERE id = ?",
+            (_hash_password(admin_pass), row["id"]),
+        )
     conn.commit()
     conn.close()
 
