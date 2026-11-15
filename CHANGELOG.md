@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.4 - secret redaction for log output (2026-11-15)
+
+`shared.tg.redact` gives the Telegram bots one way to keep API keys out of journald.
+
+- `register_secret(value)` / `unregister_secret(value)` track the live keys of every running engine in the process.
+- `redact(text)` masks registered keys wherever they appear, `api_key=` query values, `Bearer` tokens and JWTs; `mask_key` keeps the first 8 and last 4 characters.
+- `RedactingFormatter(fmt, datefmt=None)` is a drop-in `logging.Formatter` that runs each finished record through `redact`.
+- The registry exists because cryptogames puts the key in the URL path, so no pattern can find it without knowing the key.
+
+**Tests**: `tests/test_tg_redact.py` (9). **421 total passing** plus these.
+
 ## v0.3.3 - finite-number and web-credential validation for every bot (2026-11-15)
 
 Two helpers the ported bots were each missing.
