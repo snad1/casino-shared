@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.3 - finite-number and web-credential validation for every bot (2026-11-15)
+
+Two helpers the ported bots were each missing.
+
+### `shared.core.validation`
+- `finite_float(name, value, minimum=None, maximum=None)` rejects `nan`, `inf`, non-numeric input and out-of-range values, and returns the number. Messages name the field only, so they are safe to show a Telegram user.
+- `InvalidNumber` is a `ValueError`, so existing `except ValueError` paths keep working.
+- Why it exists: `float("nan") < 0` is False, so every `< 0` guard in the bots accepted a `nan` stop-loss and the comparison that should stop betting never fired.
+
+### `shared.web.settings`
+- `validate_web_credentials(secret_key, admin_pass, env_prefix="")` refuses the shipped secret and password, a secret under 32 bytes and a password under 12 characters, naming the bot's own variables (for example `GOATED_WEB_SECRET_KEY`).
+- `DEFAULT_SECRET_KEY`, `DEFAULT_ADMIN_PASS`, `MIN_SECRET_BYTES`, `MIN_ADMIN_PASS_CHARS` are exported so a bot can keep its field defaults without repeating the literals.
+
+**Tests**: `tests/test_core_validation.py` (16), `tests/test_web_settings.py` (7). **421 total passing.**
+
 ## v0.3.2 - web auth and token hardening (2026-11-15)
 
 All six bots import `shared.web`, so this lands once for all of them. A bot opts into the lockout and one-time-link controls by passing the new callbacks to `make_auth_router`; without them its login keeps today's behaviour.
