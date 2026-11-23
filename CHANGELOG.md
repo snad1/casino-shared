@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.0 - event publisher for the dashboard (2026-11-23)
+
+`shared.core.events` streams a bot's bets, state and lifecycle events to Redis, so each bot can feed the live dashboard from one module instead of its own copy. It is the WolfBet publisher with the bot-specific parts made arguments.
+
+- `EventPublisher(url, *, stream_prefix, bet_fields, lane=1, svc=None, maxlen=None, queue_max=50_000, client=None, scoped=False)`. `stream_prefix` names the streams (`<prefix>:bets`, `:state`, `:lifecycle`) and `bet_fields` the order of the values `emit_bet` takes; both are required. `svc` (default: the prefix) goes into every envelope.
+- Wire format v1 unchanged: one `data` field holding `{v, svc, lane, pid, seq, ts_ms, type, payload}`.
+- The bet path stays O(1): `emit_*` append flat frames to a bounded deque; one daemon thread sends pipelined XADD batches every 100 ms. Redis down, slow or not installed never blocks or raises; losses are counted (`dropped`, `overflow`) and show up as seq gaps. `reserve()` lets a caller skip building an event the full queue would drop.
+- `scoped=True` serves many users from one process (`<prefix>:<uid>:<stream>`, seq per user).
+- `validate_events_url(url)` accepts `redis://`, `rediss://` and `unix://` only. The URL is never logged.
+- `redis>=5` is an optional extra (`casino-shared[events]`), imported only when a publisher starts.
+
+**Tests**: `tests/test_core_events.py` (26).
+
 ## v0.3.5 - bumps belong to the base they were earned on (2026-11-23)
 
 `shared.core.run_increment` keeps the base-bet rule from WolfBet CLI v2.37.2 in one place for the five CLIs.
