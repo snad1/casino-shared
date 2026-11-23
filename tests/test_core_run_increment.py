@@ -14,9 +14,9 @@ import pytest
 
 from shared.core.database import SESSIONS_SCHEMA
 from shared.core.run_increment import (
-    OFF_VALUES, PROFIT_INCREMENT_SCOPES, check_profit_increment, db_max_session_id,
-    increment_on, load_run, next_milestone, parse_scope, resume_base_bet,
-    run_is_stale, run_path, run_profit_done, save_run,
+    OFF_VALUES, PROFIT_INCREMENT_SCOPES, bumps_for_base, check_profit_increment,
+    db_max_session_id, increment_on, load_run, next_milestone, parse_scope,
+    rebaseline, resume_base_bet, run_is_stale, run_path, run_profit_done, save_run,
 )
 
 
@@ -87,13 +87,16 @@ class TestRunFile:
     def test_load_normalises(self, tmp_path):
         p = tmp_path / "run.json"
         p.write_text(json.dumps({"first_session": "5", "started_at": "t", "bumps": -2}))
-        assert load_run(str(p)) == {"first_session": 5, "started_at": "t", "bumps": 0}
-        p.write_text(json.dumps({"first_session": 5}))
-        assert load_run(str(p)) == {"first_session": 5, "started_at": None, "bumps": 0}
+        assert load_run(str(p)) == {"first_session": 5, "started_at": "t", "bumps": 0,
+                                    "base": None}
+        p.write_text(json.dumps({"first_session": 5, "base": "0.0001"}))
+        assert load_run(str(p)) == {"first_session": 5, "started_at": None, "bumps": 0,
+                                    "base": 0.0001}
 
     def test_save_round_trip_mode_0600(self, tmp_path):
         p = str(tmp_path / "run.json")
-        run = {"first_session": 12, "started_at": "2026-11-15T10:00:00", "bumps": 2}
+        run = {"first_session": 12, "started_at": "2026-11-15T10:00:00", "bumps": 2,
+               "base": 0.00005805}
         save_run(p, run)
         assert load_run(p) == run
         assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
@@ -101,6 +104,13 @@ class TestRunFile:
         save_run(p, {**run, "bumps": 3})            # replace keeps the mode
         assert load_run(p)["bumps"] == 3
         assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+
+    def test_save_without_base_omits_the_key(self, tmp_path):
+        p = tmp_path / "run.json"
+        save_run(str(p), {"first_session": 1, "bumps": 1})
+        assert "base" not in json.loads(p.read_text())
+        save_run(str(p), {"first_session": 1, "bumps": 1, "base": None})
+        assert "base" not in json.loads(p.read_text())
 
     def test_save_failure_raises_and_cleans_tmp(self, tmp_path):
         p = str(tmp_path / "missing_dir" / "run.json")
@@ -157,6 +167,24 @@ class TestRunState:
         assert resume_base_bet(0.0001, 2, None) == 0.0001
         assert resume_base_bet(0.0001, 2, 0.0) == 0.0001
         assert resume_base_bet(0.1, 3, 0.1) == 0.4             # rounded to 8 places
+
+    def test_bumps_for_base(self):
+        assert bumps_for_base(729, 0.00006534, 0.00005805) == 0
+        assert bumps_for_base(3, 0.00005805, 0.00005805) == 3
+        assert bumps_for_base(3, None, 0.00005805) == 3
+        assert bumps_for_base(3, 0.00005805, 0.00005805 + 1e-13) == 3
+
+    def test_rebaseline_anchors_above_run_profit(self):
+        assert rebaseline(0.25, 0.00035) == pytest.approx(715 * 0.00035)
+        assert rebaseline(3 * 0.00035, 0.00035) == pytest.approx(4 * 0.00035)
+        assert rebaseline(0.0, 0.01) == pytest.approx(0.01)
+
+    def test_rebaseline_negative_profit_starts_at_first_step(self):
+        assert rebaseline(-0.5, 0.01) == pytest.approx(0.01)
+
+    @pytest.mark.parametrize("thr", [0, 0.0, None, "none", -1])
+    def test_rebaseline_threshold_off(self, thr):
+        assert rebaseline(0.25, thr) == 0.0
 
     def test_next_milestone(self):
         assert next_milestone(0, 0.01) == pytest.approx(0.01)

@@ -1,12 +1,14 @@
-"""Run-wide profit increment — pure helpers, no bot state.
+"""Run-wide profit increment: pure helpers, no bot state.
 
 Ported from the WolfBet reference bot (wolfbet.py, CLI v2.37.0).
 `profit_increment` raises the base bet each time profit reaches the next
 `profit_threshold` milestone. Scope "session" measures the current session's
 profit (the milestone resets each recurring cycle, as before). Scope "run"
 measures the total since the run started: the run is kept in a small JSON
-file per lane ({first_session, started_at, bumps}) so the bumps survive
-restarts, and the finished sessions' profit comes from the stats DB.
+file per lane ({first_session, started_at, bumps, base}) so the bumps
+survive restarts, and the finished sessions' profit comes from the stats
+DB. `base` is the configured base the bumps were earned on: bumps belong to
+that base and are dropped once the operator sets another one.
 
 Each service keeps its own state object, file paths and logging and calls
 these with plain values. WolfBet's auto-bet UUID restart on a bump is N/A:
@@ -15,6 +17,7 @@ next bet.
 """
 
 import json
+import math
 import os
 import sqlite3
 from typing import Optional, Tuple
@@ -68,7 +71,8 @@ def load_run(path: str) -> Optional[dict]:
             d = json.load(f)
         return {"first_session": int(d["first_session"]),
                 "started_at": d.get("started_at"),
-                "bumps": max(0, int(d.get("bumps") or 0))}
+                "bumps": max(0, int(d.get("bumps") or 0)),
+                "base": float(d["base"]) if d.get("base") is not None else None}
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -76,15 +80,20 @@ def load_run(path: str) -> Optional[dict]:
 def save_run(path: str, run: dict) -> None:
     """Write the run atomically (tmp file + os.replace), mode 0o600.
 
-    Raises OSError on failure (the tmp file is removed); the caller logs it.
+    `base` is written only when set, so callers that do not track it keep
+    their files unchanged. Raises OSError on failure (the tmp file is
+    removed); the caller logs it.
     """
+    payload = {"first_session": run["first_session"],
+               "started_at": run.get("started_at"),
+               "bumps": run.get("bumps", 0)}
+    if run.get("base") is not None:
+        payload["base"] = run["base"]
     tmp = path + ".tmp"
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
-            json.dump({"first_session": run["first_session"],
-                       "started_at": run.get("started_at"),
-                       "bumps": run.get("bumps", 0)}, f)
+            json.dump(payload, f)
         os.replace(tmp, path)
     except OSError:
         try:
@@ -139,6 +148,29 @@ def resume_base_bet(config_base: float, bumps: int, increment) -> float:
     if inc and bumps:
         return round(config_base + bumps * inc, 8)
     return config_base
+
+
+def bumps_for_base(bumps: int, origin: Optional[float], config_base: float) -> int:
+    """Bumps that still apply on resume: none when they were earned on another base.
+
+    A run file without an origin (written before origins were saved) keeps
+    its bumps once; the caller then adopts the current base as the origin.
+    """
+    if origin is not None and abs(float(origin) - float(config_base)) > 1e-12:
+        return 0
+    return bumps
+
+
+def rebaseline(profit_total: float, threshold) -> float:
+    """Next milestone for a run whose bumps were just dropped.
+
+    One step above the run's current profit, so the next bump needs fresh
+    profit. A negative profit anchors at the first step; off -> 0.0.
+    """
+    thr = _amount(threshold)
+    if thr is None:
+        return 0.0
+    return (max(0, math.floor(profit_total / thr + 1e-9)) + 1) * thr
 
 
 def next_milestone(bumps: int, threshold: float) -> float:

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.5 - bumps belong to the base they were earned on (2026-11-23)
+
+`shared.core.run_increment` keeps the base-bet rule from WolfBet CLI v2.37.2 in one place for the five CLIs.
+
+- The run file can carry `base`, the configured base the bumps were earned on. `load_run` returns it (`None` for older files); `save_run` writes it only when set, so callers that do not track it (the Telegram engines) write the same file as before.
+- `bumps_for_base(bumps, origin, config_base)` returns 0 when the bumps were earned on another base, and keeps them when the file has no origin.
+- `rebaseline(profit_total, threshold)` is the next milestone after bumps are dropped: one step above the run's current profit, the first step for a negative profit, 0.0 when the threshold is off.
+- `resume_base_bet` is unchanged.
+
+**Tests**: `tests/test_core_run_increment.py` (+11).
+
 ## v0.3.4 - secret redaction for log output (2026-11-15)
 
 `shared.tg.redact` gives the Telegram bots one way to keep API keys out of journald.
