@@ -30,3 +30,10 @@ def set_testing_env():
         os.environ.pop("APP_ENV", None)
     else:
         os.environ["APP_ENV"] = old
+
+
+@pytest.fixture(autouse=True)
+def isolated_vault(tmp_path, monkeypatch):
+    """Keep every vault a test opens under its temp dir, never the real home."""
+    monkeypatch.setenv("CASINO_VAULT_DIR", str(tmp_path / "vault"))
+    monkeypatch.setenv("CASINO_VAULT_KEY_FILE", str(tmp_path / "agent" / "vault.key"))

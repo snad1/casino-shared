@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.0 - host key vault (2026-11-23)
+
+`shared.core.vault` keeps casino API keys encrypted on the bot host, one file per key, so a config file never has to hold one in plaintext.
+
+- `Vault(service, root=None, kek_path=None)`: keys live in `<root>/<service>/<key_id>.json` (default root `~/.casino-vault`, or `CASINO_VAULT_DIR`), sealed with AES-256-GCM under a 32-byte key in `kek_path` (default `~/.config/casino-agent/vault.key`, or `CASINO_VAULT_KEY_FILE`), created on the first write. Files are 0600 and directories 0700.
+- `put(key_id, secret, label, owner_user_id=None)` stores or replaces a key (a replace keeps `created_at` and sets `rotated_at`); `secret(key_id)` decrypts it; `info(key_id)` returns `KeyInfo` (id, label, owner, last 4 characters, times) without decrypting. A missing key is `None`.
+- Each file carries its service and id as associated data, so a file copied under another id does not open. A wrong or missing vault key, a damaged file, a file other users can read or one owned by someone else raises `VaultError`, whose message names the key id and never the secret.
+- `cryptography>=41` is now a direct dependency (it was already installed through `python-jose[cryptography]`).
+
+**Tests**: `tests/test_core_vault.py` (round trip, private modes, rotation times, wrong key, a file under another id, tampering, loose permissions, missing key file, bad ids and service names, environment paths). The suite's `conftest.py` points the vault at a temp dir.
+
 ## v0.4.0 - event publisher for the dashboard (2026-11-23)
 
 `shared.core.events` streams a bot's bets, state and lifecycle events to Redis, so each bot can feed the live dashboard from one module instead of its own copy. It is the WolfBet publisher with the bot-specific parts made arguments.
