@@ -137,6 +137,99 @@ def lane_name(cfg: dict, lane: int) -> str:
     return entry["name"] if entry else default_lane_name(lane)
 
 
+def split_registry_pairs(pairs: List[str]) -> Tuple[List[str], dict, dict]:
+    """Split config-set pairs for a bot with a lane registry into (base, {lane: [pairs]}, block).
+
+    `block` holds the lanes-wide settings given: "count" (lanes=N), "split" (lane_split) and
+    "max" (lanes_max). The count is checked against the owner limit by the caller. Pairs
+    without "=" go to base so the bot's own parser reports them.
+    """
+    base, per_lane, block = [], {}, {}
+    for pair in pairs:
+        if "=" not in pair:
+            base.append(pair)
+            continue
+        key, val = pair.split("=", 1)
+        key = key.strip().lower()
+        m = re.match(r"^lane(\d+)\.(.+)$", key)
+        if key in ("lanes", "lanes_max"):
+            try:
+                n = int(val.strip())
+            except ValueError:
+                raise ValueError(f"{key} must be an integer 1-{LANE_ID_MAX}, got {val!r}")
+            if not 1 <= n <= LANE_ID_MAX:
+                raise ValueError(f"{key} must be 1-{LANE_ID_MAX}, got {n}")
+            block["count" if key == "lanes" else "max"] = n
+        elif key == "lane_split":
+            split = val.strip().lower()
+            if split not in LANE_SPLIT_MODES:
+                raise ValueError(f"lane_split must be one of {', '.join(LANE_SPLIT_MODES)}, "
+                                 f"got {val!r}")
+            block["split"] = split
+        elif m and m.group(2) == "name":
+            lane, name = int(m.group(1)), val.strip().strip('"').strip("'").strip()
+            if not 1 <= lane <= LANE_ID_MAX:
+                raise ValueError(f"lanes are 1-{LANE_ID_MAX}, got lane{lane}")
+            if not LANE_NAME_RE.match(name):
+                raise ValueError(LANE_NAME_HELP)
+            per_lane.setdefault(lane, []).append(f"name={name}")
+        elif m:
+            lane = int(m.group(1))
+            if not 2 <= lane <= LANE_ID_MAX:
+                raise ValueError(f"lane overrides are for lanes 2-{LANE_ID_MAX} "
+                                 f"(lane 1 uses the base config), got lane{lane}")
+            if m.group(2) == "lane_split":
+                raise ValueError("lane_split can't differ per lane (shared by all lanes)")
+            per_lane.setdefault(lane, []).append(f"{m.group(2)}={val}")
+        else:
+            base.append(pair)
+    return base, per_lane, block
+
+
+def next_lane_id(cfg: dict, reg: dict) -> int:
+    """The id the next new lane gets: never one a removed lane had."""
+    try:
+        stored = int(_lanes_block(cfg).get("next_id") or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    return max(stored, max(reg) + 1)
+
+
+def set_enabled_count(reg: dict, count: int, next_id: int) -> int:
+    """Enable `count` lanes in `reg`: disabled lanes come back first (lowest id), then new ids.
+
+    Lowering the count disables the highest enabled ids; lane 1 always stays. Returns the
+    next id. Raises ValueError when the ids run out.
+    """
+    enabled = [lane for lane in sorted(reg) if reg[lane]["enabled"]]
+    for lane in enabled[count:]:
+        reg[lane]["enabled"] = False
+    need = count - len(enabled)
+    for lane in sorted(reg):
+        if need > 0 and not reg[lane]["enabled"]:
+            reg[lane]["enabled"] = True
+            need -= 1
+    while need > 0:
+        if next_id > LANE_ID_MAX:
+            raise ValueError(f"lane ids run out at {LANE_ID_MAX}: removed ids are never reused")
+        reg[next_id] = {"name": default_lane_name(next_id), "enabled": True, "overrides": {}}
+        next_id += 1
+        need -= 1
+    return next_id
+
+
+def registry_block(cfg: dict, reg: dict, next_id: int, split: Optional[str] = None,
+                   lanes_max: Optional[int] = None) -> dict:
+    """The `lanes` block to write: split, the owner limit when set, next_id and the items."""
+    block = {"split": split if split is not None else lane_split(cfg)}
+    limit = lanes_max if lanes_max is not None else _lanes_block(cfg).get("max")
+    if limit is not None:
+        block["max"] = limit
+    block["next_id"] = next_id
+    block["items"] = {str(lane): reg[lane] for lane in sorted(reg)}
+    return block
+
+
 def request_drain(path: str, lane: int, action: str) -> None:
     """Ask lane `lane` to `restart` or be `remove`d when its session ends; `cancel` forgets it.
 

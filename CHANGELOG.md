@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.0 - lane registry writers (2026-11-24)
+
+- `core/lanes.py` writes the lane registry too: `split_registry_pairs` (config-set pairs for `lanes`, `lanes_max`, `lane_split`, `laneK.name` and `laneK.key`, lane ids up to 99), `next_lane_id` (never a removed id), `set_enabled_count` (disabled lanes come back first, then new ids) and `registry_block` (the `lanes` block to write). Moved from WolfBet so each bot port uses one copy. `split_lane_pairs` is unchanged for the bots still on the count shape.
+
+**Tests**: `tests/test_core_lane_registry.py` (pair splitting and refusals, enabling counts up and down, ids running out, the written block reads back).
+
 ## v0.9.0 - lane registry, session-end requests and a vault client (2026-11-24)
 
 - `core/lanes.py` reads the lane registry: `lane_registry`, `lane_ids`, `lane_name`, `default_lane_name`, `lanes_max`, `lane_file_ids`, `LANE_ID_MAX`, `LANE_NAME_RE` and `LANE_NAME_HELP`. Named lanes (`lanes.items`) and the older `lanes.count` + `lanes.overrides` shape read the same way. `lanes_count` and `lane_overrides` now read the registry; for a config with `lanes.count` they return what they always did.
