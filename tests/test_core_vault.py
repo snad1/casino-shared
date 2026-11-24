@@ -122,3 +122,25 @@ def test_paths_default_to_the_environment(monkeypatch, tmp_path):
     v.put("default", SECRET, "x")
     assert os.path.exists(tmp_path / "v/wolfbet/default.json")
     assert os.path.exists(tmp_path / "k/vault.key")
+
+
+def test_keys_lists_every_key_without_secrets_and_skips_a_damaged_file(vault):
+    vault.put("friend-a", "friend-secret-0001", "Friend A", owner_user_id=7)
+    vault.put("default", SECRET, "Main")
+    with open(os.path.join(vault.dir, "broken.json"), "w") as f:
+        f.write("{")
+    os.chmod(os.path.join(vault.dir, "broken.json"), 0o600)
+    keys = vault.keys()
+    assert [k.key_id for k in keys] == ["default", "friend-a"]
+    assert keys[1].owner_user_id == 7 and keys[1].last4 == "0001"
+    assert SECRET not in repr(keys)
+
+
+def test_an_empty_vault_lists_nothing(vault):
+    assert vault.keys() == []
+
+
+def test_delete_removes_one_key(vault):
+    vault.put("friend-a", "friend-secret-0001", "Friend A")
+    assert vault.delete("friend-a") is True
+    assert vault.secret("friend-a") is None and vault.delete("friend-a") is False

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.0 - list and delete vault keys (2026-11-23)
+
+- `Vault.keys()` returns the `KeyInfo` of every key that opens, sorted by id; a damaged, unreadable or loosely permissioned file is left out instead of failing the whole list. No secret is decrypted.
+- `Vault.delete(key_id)` removes one key and returns False when there was none.
+
+**Tests**: `tests/test_core_vault.py` (list order and owner, a damaged file skipped, an empty vault, delete).
+
 ## v0.5.0 - host key vault (2026-11-23)
 
 `shared.core.vault` keeps casino API keys encrypted on the bot host, one file per key, so a config file never has to hold one in plaintext.

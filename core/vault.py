@@ -18,7 +18,7 @@ import re
 import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 KEY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 SERVICE_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
@@ -141,6 +141,34 @@ class Vault:
         """What is known about `key_id` without decrypting it, or None when it is absent."""
         doc = self._read(key_id)
         return None if doc is None else self._info(doc)
+
+    def keys(self) -> List[KeyInfo]:
+        """Every key that opens, sorted by id; a damaged or unreadable file is left out."""
+        try:
+            names = sorted(os.listdir(self.dir))
+        except FileNotFoundError:
+            return []
+        out = []
+        for name in names:
+            key_id = name[:-5] if name.endswith(".json") else ""
+            if not KEY_ID_RE.match(key_id):
+                continue
+            try:
+                info = self.info(key_id)
+            except VaultError:
+                continue
+            if info is not None:
+                out.append(info)
+        return out
+
+    def delete(self, key_id: str) -> bool:
+        """Remove `key_id`; False when the vault has no such key."""
+        self._check_id(key_id)
+        try:
+            os.remove(self._path(key_id))
+        except FileNotFoundError:
+            return False
+        return True
 
     def _check_id(self, key_id: str) -> None:
         if not isinstance(key_id, str) or not KEY_ID_RE.match(key_id):
