@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0 - vault entries have a kind (2026-11-24)
+
+- `Vault.put(..., kind="key")` stores what an entry is: a casino `key` or a `proxy` URL that carries credentials. `KeyInfo.kind` reports it; files written before v0.7.0 read as `key`. Any other kind raises `VaultError`.
+
+**Tests**: `tests/test_core_vault.py` (kind stored and listed, older files read as keys, unknown kind refused).
+
 ## v0.6.0 - list and delete vault keys (2026-11-23)
 
 - `Vault.keys()` returns the `KeyInfo` of every key that opens, sorted by id; a damaged, unreadable or loosely permissioned file is left out instead of failing the whole list. No secret is decrypted.

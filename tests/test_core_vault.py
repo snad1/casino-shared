@@ -144,3 +144,20 @@ def test_delete_removes_one_key(vault):
     vault.put("friend-a", "friend-secret-0001", "Friend A")
     assert vault.delete("friend-a") is True
     assert vault.secret("friend-a") is None and vault.delete("friend-a") is False
+
+
+def test_a_proxy_entry_keeps_its_kind_and_older_files_read_as_keys(vault):
+    vault.put("friend-a-proxy", "socks5://u:p@10.0.0.9:1080", "Friend proxy", kind="proxy")
+    vault.put("default", SECRET, "Main")
+    path = os.path.join(vault.dir, "default.json")
+    doc = json.load(open(path))
+    doc.pop("kind")
+    with open(path, "w") as f:
+        json.dump(doc, f)
+    assert [(k.key_id, k.kind) for k in vault.keys()] == [
+        ("default", "key"), ("friend-a-proxy", "proxy")]
+
+
+def test_an_unknown_kind_is_refused(vault):
+    with pytest.raises(VaultError, match="kind must be"):
+        vault.put("x", SECRET, "x", kind="cookie")

@@ -23,6 +23,7 @@ from typing import List, Optional
 KEY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 SERVICE_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 LABEL_MAX = 64
+KINDS = ("key", "proxy")
 SECRET_MAX = 4096
 _KEK_BYTES = 32
 _NONCE_BYTES = 12
@@ -37,6 +38,7 @@ class VaultError(Exception):
 class KeyInfo:
     key_id: str
     label: str
+    kind: str
     owner_user_id: Optional[int]
     last4: str
     created_at: str
@@ -94,9 +96,11 @@ class Vault:
         self.dir = os.path.join(self.root, service)
 
     def put(self, key_id: str, secret: str, label: str,
-            owner_user_id: Optional[int] = None) -> KeyInfo:
-        """Store `secret` as `key_id`; replacing a key keeps its created time and sets rotated."""
+            owner_user_id: Optional[int] = None, kind: str = "key") -> KeyInfo:
+        """Store `secret` as `key_id` (a casino `key` or a `proxy` URL); a replace keeps created."""
         self._check_id(key_id)
+        if kind not in KINDS:
+            raise VaultError(f"key {key_id!r}: kind must be one of {', '.join(KINDS)}")
         if not isinstance(secret, str) or not secret or len(secret) > SECRET_MAX:
             raise VaultError(f"key {key_id!r}: the secret must be 1-{SECRET_MAX} characters")
         label = (label or "").strip()[:LABEL_MAX] or key_id
@@ -109,6 +113,7 @@ class Vault:
             "v": _FORMAT,
             "key_id": key_id,
             "label": label,
+            "kind": kind,
             "owner_user_id": owner_user_id,
             "last4": secret[-4:],
             "nonce": base64.b64encode(nonce).decode(),
@@ -200,6 +205,7 @@ class Vault:
         return KeyInfo(
             key_id=doc["key_id"],
             label=str(doc.get("label") or doc["key_id"]),
+            kind=doc.get("kind") if doc.get("kind") in KINDS else "key",
             owner_user_id=owner if isinstance(owner, int) else None,
             last4=str(doc.get("last4") or ""),
             created_at=str(doc.get("created_at") or ""),
