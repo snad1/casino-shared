@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.0 - a vault entry can hold the Telegram bot token (2026-11-24)
+
+- New kind `telegram`: `Vault.put(..., kind="telegram")` stores a Telegram bot token like any other secret (encrypted, write-only, listed with its last 4 characters).
+
+**Tests**: `tests/test_core_vault.py` (a telegram entry is stored, listed with its kind and read back).
+
 ## v0.7.0 - vault entries have a kind (2026-11-24)
 
 - `Vault.put(..., kind="key")` stores what an entry is: a casino `key` or a `proxy` URL that carries credentials. `KeyInfo.kind` reports it; files written before v0.7.0 read as `key`. Any other kind raises `VaultError`.

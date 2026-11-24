@@ -158,6 +158,14 @@ def test_a_proxy_entry_keeps_its_kind_and_older_files_read_as_keys(vault):
         ("default", "key"), ("friend-a-proxy", "proxy")]
 
 
+def test_a_telegram_bot_token_is_its_own_kind(vault):
+    vault.put("telegram", "123456789:AAH-telegram-bot-token-x9Yz0123456789ab", "Telegram bot",
+              kind="telegram")
+    [info] = vault.keys()
+    assert (info.key_id, info.kind, info.last4) == ("telegram", "telegram", "89ab")
+    assert vault.secret("telegram").startswith("123456789:")
+
+
 def test_an_unknown_kind_is_refused(vault):
     with pytest.raises(VaultError, match="kind must be"):
         vault.put("x", SECRET, "x", kind="cookie")

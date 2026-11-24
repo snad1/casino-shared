@@ -23,7 +23,7 @@ from typing import List, Optional
 KEY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 SERVICE_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 LABEL_MAX = 64
-KINDS = ("key", "proxy")
+KINDS = ("key", "proxy", "telegram")
 SECRET_MAX = 4096
 _KEK_BYTES = 32
 _NONCE_BYTES = 12
@@ -97,7 +97,8 @@ class Vault:
 
     def put(self, key_id: str, secret: str, label: str,
             owner_user_id: Optional[int] = None, kind: str = "key") -> KeyInfo:
-        """Store `secret` as `key_id` (a casino `key` or a `proxy` URL); a replace keeps created."""
+        """Store `secret` as `key_id` (a casino `key`, a `proxy` URL or a `telegram` bot token);
+        a replace keeps created."""
         self._check_id(key_id)
         if kind not in KINDS:
             raise VaultError(f"key {key_id!r}: kind must be one of {', '.join(KINDS)}")
