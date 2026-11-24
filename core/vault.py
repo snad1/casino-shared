@@ -13,6 +13,7 @@ name the key id and the problem, never the secret.
 
 import base64
 import json
+import logging
 import os
 import re
 import stat
@@ -238,3 +239,31 @@ class Vault:
         if len(kek) != _KEK_BYTES:
             raise VaultError("the vault key file is damaged")
         return kek
+
+
+def vault_info(service: str, key_id: str,
+               log: Optional[logging.Logger] = None) -> Optional[KeyInfo]:
+    """What `service`'s vault knows about `key_id` (no secret), or None when it is absent, a
+    bad id, or the vault is unusable (logged on `log`, without the secret)."""
+    if not KEY_ID_RE.match(key_id or ""):
+        return None
+    try:
+        return Vault(service).info(key_id)
+    except (VaultError, OSError) as e:
+        (log or logging.getLogger(__name__)).warning("Key vault unavailable: %s", e)
+        return None
+
+
+def vault_secret(service: str, key_id: str, kind: str = "key",
+                 log: Optional[logging.Logger] = None) -> Optional[str]:
+    """`service`'s vault entry `key_id` when it is of `kind`, else None: absent, another kind,
+    a bad id, or the vault is unusable (logged on `log`, without the secret)."""
+    if not KEY_ID_RE.match(key_id or ""):
+        return None
+    try:
+        vault = Vault(service)
+        info = vault.info(key_id)
+        return vault.secret(key_id) if info is not None and info.kind == kind else None
+    except (VaultError, OSError) as e:
+        (log or logging.getLogger(__name__)).warning("Key vault unavailable: %s", e)
+        return None

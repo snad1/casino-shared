@@ -169,3 +169,37 @@ def test_a_telegram_bot_token_is_its_own_kind(vault):
 def test_an_unknown_kind_is_refused(vault):
     with pytest.raises(VaultError, match="kind must be"):
         vault.put("x", SECRET, "x", kind="cookie")
+
+
+@pytest.fixture
+def host_vault(tmp_path, monkeypatch):
+    """The default-path vault the bots open, pointed at tmp."""
+    monkeypatch.setenv("CASINO_VAULT_DIR", str(tmp_path / "vault"))
+    monkeypatch.setenv("CASINO_VAULT_KEY_FILE", str(tmp_path / "agent/vault.key"))
+    return Vault("wolfbet")
+
+
+def test_the_client_reads_an_entry_of_the_asked_kind_only(host_vault):
+    from shared.core.vault import vault_info, vault_secret
+    host_vault.put("default", SECRET, "Main")
+    host_vault.put("px", "http://u:p@10.0.0.2:3128", "Proxy", kind="proxy")
+    assert vault_secret("wolfbet", "default") == SECRET
+    assert vault_secret("wolfbet", "default", "proxy") is None
+    assert vault_secret("wolfbet", "px", "proxy") == "http://u:p@10.0.0.2:3128"
+    assert vault_secret("wolfbet", "missing") is None
+    assert vault_secret("wolfbet", "Bad Id!") is None
+    assert vault_info("wolfbet", "px").kind == "proxy"
+    assert vault_info("wolfbet", "missing") is None and vault_info("wolfbet", "") is None
+
+
+def test_an_unusable_vault_is_logged_without_the_secret(host_vault, caplog):
+    import logging
+
+    from shared.core.vault import vault_info, vault_secret
+    host_vault.put("default", SECRET, "Main")
+    os.chmod(host_vault.kek_path, 0o644)
+    log = logging.getLogger("a-bot")
+    with caplog.at_level(logging.WARNING, logger="a-bot"):
+        assert vault_secret("wolfbet", "default", log=log) is None
+        assert vault_info("wolfbet", "default", log=log) is not None
+    assert "Key vault unavailable" in caplog.text and SECRET not in caplog.text

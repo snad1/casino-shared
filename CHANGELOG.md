@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.0 - lane registry, session-end requests and a vault client (2026-11-24)
+
+- `core/lanes.py` reads the lane registry: `lane_registry`, `lane_ids`, `lane_name`, `default_lane_name`, `lanes_max`, `lane_file_ids`, `LANE_ID_MAX`, `LANE_NAME_RE` and `LANE_NAME_HELP`. Named lanes (`lanes.items`) and the older `lanes.count` + `lanes.overrides` shape read the same way. `lanes_count` and `lane_overrides` now read the registry; for a config with `lanes.count` they return what they always did.
+- Session-end requests: `request_drain(path, lane, action)` writes `restart` or `remove` for a lane (0600) or forgets it with `cancel`; `take_drain(path, lane)` reads it once and deletes it.
+- Vault client: `vault_secret(service, key_id, kind)` and `vault_info(service, key_id)` give None when an entry is absent, of another kind, a bad id, or the vault is unusable; the last is logged on the caller's logger, never with the secret.
+
+**Tests**: `tests/test_core_lane_registry.py` (both config shapes, clamps, lane files, requests), `tests/test_core_vault.py` (the client). The goated, shuffle, stake, cryptogames and duckdice suites pass unchanged.
+
 ## v0.8.0 - a vault entry can hold the Telegram bot token (2026-11-24)
 
 - New kind `telegram`: `Vault.put(..., kind="telegram")` stores a Telegram bot token like any other secret (encrypted, write-only, listed with its last 4 characters).

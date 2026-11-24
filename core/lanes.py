@@ -1,6 +1,6 @@
-"""Parallel lanes — pure helpers, no bot state.
+"""Parallel lanes: pure helpers, no bot state.
 
-Ported from the WolfBet reference bot (wolfbet.py, CLI v2.35.0–v2.36.0).
+Ported from the WolfBet reference bot (wolfbet.py, CLI v2.35.0 to v2.36.0).
 A lane is one bot process with its own session, Martingale chain, counters,
 stops and pauses. Lane 1 is the classic single bot (paths unchanged); lanes
 2..N run side by side on the same account, config file and stats DB.
@@ -15,6 +15,14 @@ import re
 from typing import Iterable, List, Optional, Tuple
 
 LANES_MAX = 10
+# Lane ids a registry may hold; at most `lanes.max` (default LANES_MAX) are enabled at once.
+LANE_ID_MAX = 99
+
+LANE_NAME_RE = re.compile(r"^[A-Za-z0-9 _-]{1,32}$")
+LANE_NAME_HELP = "lane name must be 1-32 characters: letters, digits, space, _ or -"
+
+# What a lane may be asked to do when its current session ends.
+DRAIN_ACTIONS = ("restart", "remove")
 
 # Stop-reason prefix when a lane's next bet is larger than its equity.
 # Not on the recurring restart whitelist, so it never restarts.
@@ -23,7 +31,7 @@ LANE_BUDGET_REASON = "Lane budget exceeded"
 # `config-set laneK.key=<one of these>` removes the override.
 LANE_UNSET_VALUES = ("default", "unset", "inherit")
 
-# v2.36.0 — how lanes share the money (`lanes.split`, shared by all lanes).
+# v2.36.0: how lanes share the money (`lanes.split`, shared by all lanes).
 #   none   → every lane uses the full base bet, no lane budget (default)
 #   budget → each lane may risk balance ÷ lanes
 #   bet    → base bet (and basebet_pct) ÷ lanes
@@ -50,6 +58,117 @@ def lane_path(path: str, lane: int) -> str:
     return f"{root}.lane{lane}{ext}"
 
 
+def lane_file_ids(path: str) -> List[int]:
+    """Lane ids that have a file next to `path` (lane 1 = `path`, lane K = its .laneK twin)."""
+    import glob
+    root, ext = os.path.splitext(path)
+    ids = [1] if os.path.exists(path) else []
+    for f in glob.glob(f"{glob.escape(root)}.lane*{glob.escape(ext)}"):
+        tag = f[len(root) + len(".lane"):len(f) - len(ext)]
+        if tag.isdigit():
+            ids.append(int(tag))
+    return sorted(ids)
+
+
+def default_lane_name(lane: int) -> str:
+    return f"Lane {lane}"
+
+
+def lane_registry(cfg: dict) -> dict:
+    """Every configured lane as {id: {"name", "enabled", "overrides"}}, ids 1..LANE_ID_MAX.
+
+    Reads `lanes.items`; a config written before lanes had names (`lanes.count` plus
+    `lanes.overrides`) reads as lanes 1..count enabled, and lanes that only have overrides
+    above the count as disabled, so both shapes behave the same. Lane 1 is always enabled.
+    """
+    block = _lanes_block(cfg)
+    items = block.get("items")
+    reg = {}
+    if isinstance(items, dict):
+        for key, entry in items.items():
+            try:
+                lane = int(key)
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= lane <= LANE_ID_MAX or not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            reg[lane] = {
+                "name": name if isinstance(name, str) and LANE_NAME_RE.match(name)
+                else default_lane_name(lane),
+                "enabled": bool(entry.get("enabled", True)),
+                "overrides": dict(entry.get("overrides") or {}),
+            }
+    else:
+        try:
+            count = max(1, min(LANES_MAX, int(block.get("count") or 1)))
+        except (TypeError, ValueError):
+            count = 1
+        overrides = block.get("overrides")
+        overrides = overrides if isinstance(overrides, dict) else {}
+        ids = set(range(1, count + 1))
+        for key in overrides:
+            if str(key).isdigit() and 1 <= int(key) <= LANES_MAX:
+                ids.add(int(key))
+        for lane in sorted(ids):
+            ov = overrides.get(str(lane))
+            reg[lane] = {"name": default_lane_name(lane), "enabled": lane <= count,
+                         "overrides": dict(ov) if isinstance(ov, dict) else {}}
+    reg.setdefault(1, {"name": default_lane_name(1), "enabled": True, "overrides": {}})
+    reg[1]["enabled"] = True
+    return reg
+
+
+def lanes_max(cfg: dict) -> int:
+    """How many lanes may be enabled at once: the owner-set `lanes.max`, default LANES_MAX."""
+    try:
+        return max(1, min(LANE_ID_MAX, int(_lanes_block(cfg).get("max") or LANES_MAX)))
+    except (TypeError, ValueError):
+        return LANES_MAX
+
+
+def lane_ids(cfg: dict) -> List[int]:
+    """Every registry lane id, enabled or not, in order."""
+    return sorted(lane_registry(cfg))
+
+
+def lane_name(cfg: dict, lane: int) -> str:
+    entry = lane_registry(cfg).get(lane)
+    return entry["name"] if entry else default_lane_name(lane)
+
+
+def request_drain(path: str, lane: int, action: str) -> None:
+    """Ask lane `lane` to `restart` or be `remove`d when its session ends; `cancel` forgets it.
+
+    `path` is the lane-1 request file; lane K uses its .laneK twin, written 0600.
+    """
+    target = lane_path(path, lane)
+    if action == "cancel":
+        if os.path.exists(target):
+            os.remove(target)
+        return
+    if action not in DRAIN_ACTIONS:
+        raise ValueError(f"drain action must be one of {DRAIN_ACTIONS} or cancel, got {action!r}")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(action)
+
+
+def take_drain(path: str, lane: int) -> Optional[str]:
+    """The request waiting for lane `lane`, deleted before it is returned; None when there is none.
+
+    Deleting first means a lane that fails to come back never loops on its request. An
+    unreadable file raises OSError for the caller to log.
+    """
+    target = lane_path(path, lane)
+    if not os.path.exists(target):
+        return None
+    with open(target) as f:
+        action = f.read().strip()
+    os.remove(target)
+    return action
+
+
 def validate_lane(lane: Optional[int]) -> int:
     """`--lane` value → lane number (None = 1); outside 1..LANES_MAX raises."""
     lane = 1 if lane is None else int(lane)
@@ -59,12 +178,9 @@ def validate_lane(lane: Optional[int]) -> int:
 
 
 def lanes_count(cfg: dict) -> int:
-    """Configured lane count, clamped to 1..LANES_MAX; a bad block counts as 1."""
-    try:
-        n = int(_lanes_block(cfg).get("count") or 1)
-    except (TypeError, ValueError):
-        n = 1
-    return max(1, min(LANES_MAX, n))
+    """How many lanes run: the enabled lanes of the registry (`lanes.count`, clamped to
+    1..LANES_MAX, for a config without named lanes)."""
+    return sum(1 for entry in lane_registry(cfg).values() if entry["enabled"])
 
 
 def lane_split(cfg: dict) -> str:
@@ -77,10 +193,7 @@ def lane_overrides(cfg: dict, lane: int, forbidden: Iterable[str]) -> dict:
     """Per-lane override dict without forbidden keys (lane 1 has none)."""
     if lane <= 1:
         return {}
-    overrides = _lanes_block(cfg).get("overrides")
-    ov = overrides.get(str(lane)) if isinstance(overrides, dict) else None
-    if not isinstance(ov, dict):
-        return {}
+    ov = (lane_registry(cfg).get(lane) or {}).get("overrides") or {}
     forbidden = set(forbidden)
     return {k: v for k, v in ov.items() if k not in forbidden}
 
@@ -128,10 +241,10 @@ def split_base_bet(base, lanes: int, mode: str, has_override: bool,
         return base, None
     split = round(base / n, 8)
     if split <= 0:
-        return base, f"lane split: base_bet {base:.8f} ÷ {n} rounds to 0 — using full bet"
+        return base, f"lane split: base_bet {base:.8f} ÷ {n} rounds to 0: using full bet"
     if min_bet and split < min_bet:
         return base, (f"lane split: base_bet {base:.8f} ÷ {n} = {split:.8f} is below "
-                      f"the minimum bet {min_bet:.8f} — using full bet")
+                      f"the minimum bet {min_bet:.8f}: using full bet")
     return split, None
 
 
