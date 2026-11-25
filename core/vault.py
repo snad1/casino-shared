@@ -31,6 +31,27 @@ _NONCE_BYTES = 12
 _FORMAT = 1
 
 
+KEY_SECRET_RE = re.compile(r"^[\x21-\x7e]{8,4096}$")
+KEY_SECRET_HELP = "the key must be 8-4096 printable characters with no spaces"
+TELEGRAM_TOKEN_RE = re.compile(r"^\d{5,12}:[A-Za-z0-9_-]{30,64}$")
+
+
+def check_secret(secret: str, kind: str = "key") -> None:
+    """Raise ValueError when `secret` can't be stored as `kind`; the message never repeats it."""
+    if not isinstance(secret, str) or not KEY_SECRET_RE.match(secret):
+        raise ValueError(KEY_SECRET_HELP)
+    if kind == "telegram" and not TELEGRAM_TOKEN_RE.match(secret):
+        raise ValueError("That doesn't look like a Telegram bot token.")
+    if kind == "proxy":
+        from .net import validate_proxy
+        try:
+            ok = validate_proxy(secret) is not None
+        except ValueError:
+            ok = False
+        if not ok:
+            raise ValueError("a proxy must be an http://, https:// or socks5:// URL")
+
+
 class VaultError(Exception):
     """The vault can't be used or a key can't be read or written; never carries a secret."""
 

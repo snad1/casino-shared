@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.0 - lane accounts and secret checks (2026-11-25)
+
+- `core/lanes.py`: `lane_account(cfg, lane, forbidden, default_key)` gives the key, currency, proxy and vault proxy a lane bets with; `account_lanes(...)` counts the enabled lanes on the same key and currency. `lane_config` now divides the bet split by `account_lanes`, so lanes on different accounts never share a split. For a bot where key and currency can't differ per lane the result is the same as before. Moved from WolfBet.
+- `core/vault.py`: `check_secret(secret, kind)` refuses a key that isn't 8-4096 printable characters, a Telegram token of the wrong shape and a proxy that isn't http, https or socks5; the message never repeats the secret. `KEY_SECRET_RE`, `KEY_SECRET_HELP` and `TELEGRAM_TOKEN_RE` moved from WolfBet.
+
+**Tests**: `tests/test_core_lane_registry.py` (accounts, split per account, the count shape unchanged), `tests/test_core_vault.py` (secret checks without echo).
+
 ## v0.10.0 - lane registry writers (2026-11-24)
 
 - `core/lanes.py` writes the lane registry too: `split_registry_pairs` (config-set pairs for `lanes`, `lanes_max`, `lane_split`, `laneK.name` and `laneK.key`, lane ids up to 99), `next_lane_id` (never a removed id), `set_enabled_count` (disabled lanes come back first, then new ids) and `registry_block` (the `lanes` block to write). Moved from WolfBet so each bot port uses one copy. `split_lane_pairs` is unchanged for the bots still on the count shape.

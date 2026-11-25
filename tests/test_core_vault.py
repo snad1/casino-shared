@@ -203,3 +203,23 @@ def test_an_unusable_vault_is_logged_without_the_secret(host_vault, caplog):
         assert vault_secret("wolfbet", "default", log=log) is None
         assert vault_info("wolfbet", "default", log=log) is not None
     assert "Key vault unavailable" in caplog.text and SECRET not in caplog.text
+
+
+@pytest.mark.parametrize(("secret", "kind", "message"), [
+    ("short", "key", "the key must be 8-4096 printable characters with no spaces"),
+    ("has a space in it", "key", "the key must be 8-4096 printable characters with no spaces"),
+    ("not-a-bot-token-at-all", "telegram", "That doesn't look like a Telegram bot token."),
+    ("ftp://user:pw@host:21", "proxy", "a proxy must be an http://, https:// or socks5:// URL"),
+])
+def test_a_secret_that_cant_be_stored_is_refused_without_echo(secret, kind, message):
+    from shared.core.vault import check_secret
+    with pytest.raises(ValueError) as exc:
+        check_secret(secret, kind)
+    assert str(exc.value) == message and secret not in str(exc.value)
+
+
+def test_good_secrets_pass():
+    from shared.core.vault import check_secret
+    check_secret(SECRET)
+    check_secret("12345:" + "a" * 35, "telegram")
+    check_secret("socks5://user:pw@10.0.0.2:1080", "proxy")

@@ -146,3 +146,29 @@ def test_the_written_block_keeps_split_and_limit():
     assert registry_block({}, _reg(1), 2, split="bet", lanes_max=5)["max"] == 5
     assert "max" not in registry_block({}, _reg(1), 2)
     assert lane_registry({"lanes": block}) == _reg(1, 3)
+
+
+def test_a_lane_account_is_its_key_currency_and_proxies():
+    from shared.core.lanes import lane_account
+    cfg = {"currency": "usdt", "proxy": "http://p:1", "lanes": {"items": {
+        "1": {"name": "Lane 1"}, "3": {"overrides": {"key_ref": "friend-a", "currency": "trx",
+                                                       "proxy_ref": "px", "api_key": "x"}}}}}
+    assert lane_account(cfg, 1, FORBIDDEN) == ("default", "usdt", "http://p:1", None)
+    assert lane_account(cfg, 3, set()) == ("friend-a", "trx", "http://p:1", "px")
+    assert lane_account(cfg, 3, {"currency"}, default_key="main")[1] == "usdt"
+
+
+def test_a_split_never_pools_two_accounts():
+    from shared.core.lanes import account_lanes, lane_config
+    cfg = {"base_bet": 0.0004, "lanes": {"split": "bet", "items": {
+        "1": {}, "2": {}, "3": {"overrides": {"key_ref": "friend-a"}}, "4": {"enabled": False}}}}
+    assert (account_lanes(cfg, 1, set()), account_lanes(cfg, 3, set())) == (2, 1)
+    assert lane_config(cfg, 2, set())[0]["base_bet"] == 0.0002
+    assert lane_config(cfg, 3, set())[0]["base_bet"] == 0.0004
+
+
+def test_the_count_shape_splits_as_before_when_accounts_are_not_per_lane():
+    from shared.core.lanes import lane_config
+    cfg = {"base_bet": 0.0003, "currency": "usdt",
+           "lanes": {"count": 3, "split": "bet", "overrides": {"2": {"currency": "btc"}}}}
+    assert lane_config(cfg, 2, {"currency"})[0]["base_bet"] == 0.0001

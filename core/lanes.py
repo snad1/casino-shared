@@ -230,6 +230,25 @@ def registry_block(cfg: dict, reg: dict, next_id: int, split: Optional[str] = No
     return block
 
 
+def lane_account(cfg: dict, lane: int, forbidden: Iterable[str],
+                 default_key: str = "default") -> tuple:
+    """(key_ref, currency, proxy, proxy_ref) lane `lane` bets with: base values, then its overrides."""
+    merged = {**cfg, **lane_overrides(cfg, lane, forbidden)}
+    return (merged.get("key_ref") or default_key, merged.get("currency"),
+            merged.get("proxy"), merged.get("proxy_ref"))
+
+
+def account_lanes(cfg: dict, lane: int, forbidden: Iterable[str],
+                  default_key: str = "default") -> int:
+    """Enabled lanes on the same account (key and currency) as `lane`: a split never pools the
+    balances of different accounts."""
+    forbidden = set(forbidden)
+    mine = lane_account(cfg, lane, forbidden, default_key)[:2]
+    return sum(1 for k, entry in lane_registry(cfg).items()
+               if entry["enabled"]
+               and lane_account(cfg, k, forbidden, default_key)[:2] == mine) or 1
+
+
 def request_drain(path: str, lane: int, action: str) -> None:
     """Ask lane `lane` to `restart` or be `remove`d when its session ends; `cancel` forgets it.
 
@@ -303,19 +322,21 @@ def split_bet_divisor(lanes: int, mode: str) -> int:
 
 def lane_config(cfg: dict, lane: int, forbidden: Iterable[str],
                 min_bet: float = 0) -> Tuple[dict, Optional[str]]:
-    """Base config + this lane's overrides + the bet split (v2.36.0).
+    """Base config + this lane's overrides + the bet split (v2.36.0), divided among the
+    enabled lanes on the same account.
 
     A lane with its own base_bet override keeps that exact value: the user
     already sized it. A split bet that would round to 0 or fall below the
     service's min_bet (0 = no minimum) stays full, and the second value is a
     warning for the caller to log (else None).
     """
+    forbidden = set(forbidden)
     ov = lane_overrides(cfg, lane, forbidden)
     merged = {**cfg, **ov}
     if "base_bet" in merged:
         merged["base_bet"], note = split_base_bet(
-            merged["base_bet"], lanes_count(cfg), lane_split(cfg), "base_bet" in ov,
-            min_bet)
+            merged["base_bet"], account_lanes(cfg, lane, forbidden), lane_split(cfg),
+            "base_bet" in ov, min_bet)
         return merged, note
     return merged, None
 
