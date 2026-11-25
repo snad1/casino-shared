@@ -24,8 +24,13 @@ from typing import List, Optional
 KEY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 SERVICE_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 LABEL_MAX = 64
-KINDS = ("key", "proxy", "telegram")
+KINDS = ("key", "proxy", "telegram", "account")
 SECRET_MAX = 4096
+# An `account` entry holds several named secrets of one casino login (a token plus a browser
+# cookie, say) as one JSON object; a cookie header has spaces and runs to a few KB.
+ACCOUNT_MAX = 16384
+_ACCOUNT_FIELD_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_ACCOUNT_VALUE_RE = re.compile(r"^[\x20-\x7e]*$")
 _KEK_BYTES = 32
 _NONCE_BYTES = 12
 _FORMAT = 1
@@ -50,6 +55,20 @@ def check_secret(secret: str, kind: str = "key") -> None:
             ok = False
         if not ok:
             raise ValueError("a proxy must be an http://, https:// or socks5:// URL")
+
+
+def check_account(fields: dict, names) -> None:
+    """Raise ValueError unless `fields` holds exactly `names`, each printable text (spaces
+    allowed) and the whole entry fits ACCOUNT_MAX; the message names a field, never a value."""
+    if not isinstance(fields, dict) or set(fields) != set(names):
+        raise ValueError(f"an account needs exactly these fields: {', '.join(names)}")
+    for name, value in fields.items():
+        if not _ACCOUNT_FIELD_RE.match(name):
+            raise ValueError("an account field name must be 1-32 lowercase letters, digits or _")
+        if not isinstance(value, str) or not _ACCOUNT_VALUE_RE.match(value):
+            raise ValueError(f"{name} must be printable text on one line")
+    if len(json.dumps(fields, separators=(",", ":"))) > ACCOUNT_MAX:
+        raise ValueError(f"the account is longer than {ACCOUNT_MAX} characters")
 
 
 class VaultError(Exception):
@@ -124,8 +143,41 @@ class Vault:
         self._check_id(key_id)
         if kind not in KINDS:
             raise VaultError(f"key {key_id!r}: kind must be one of {', '.join(KINDS)}")
+        if kind == "account":
+            raise VaultError(f"key {key_id!r}: store an account with put_account")
         if not isinstance(secret, str) or not secret or len(secret) > SECRET_MAX:
             raise VaultError(f"key {key_id!r}: the secret must be 1-{SECRET_MAX} characters")
+        return self._seal(key_id, secret, label, owner_user_id, kind, secret[-4:])
+
+    def put_account(self, key_id: str, fields: dict, label: str, primary: str,
+                    owner_user_id: Optional[int] = None) -> KeyInfo:
+        """Store the named secrets of one login as `key_id` (kind `account`); `last4` comes
+        from `fields[primary]`. A replace keeps created."""
+        self._check_id(key_id)
+        try:
+            check_account(fields, list(fields))
+        except ValueError as e:
+            raise VaultError(f"key {key_id!r}: {e}") from None
+        if not fields.get(primary):
+            raise VaultError(f"key {key_id!r}: {primary} can't be empty")
+        sealed = json.dumps(fields, separators=(",", ":"))
+        return self._seal(key_id, sealed, label, owner_user_id, "account", fields[primary][-4:])
+
+    def account(self, key_id: str) -> Optional[dict]:
+        """The named secrets of account `key_id`, or None when it is absent or another kind."""
+        info = self.info(key_id)
+        if info is None or info.kind != "account":
+            return None
+        try:
+            fields = json.loads(self.secret(key_id) or "")
+        except ValueError:
+            raise VaultError(f"key {key_id!r}: the vault file is damaged") from None
+        if not isinstance(fields, dict) or not all(isinstance(v, str) for v in fields.values()):
+            raise VaultError(f"key {key_id!r}: the vault file is damaged")
+        return fields
+
+    def _seal(self, key_id: str, secret: str, label: str, owner_user_id: Optional[int],
+              kind: str, last4: str) -> KeyInfo:
         label = (label or "").strip()[:LABEL_MAX] or key_id
         old = self.info(key_id)
         now = _now()
@@ -138,7 +190,7 @@ class Vault:
             "label": label,
             "kind": kind,
             "owner_user_id": owner_user_id,
-            "last4": secret[-4:],
+            "last4": last4,
             "nonce": base64.b64encode(nonce).decode(),
             "ciphertext": base64.b64encode(sealed).decode(),
             "created_at": old.created_at if old else now,
@@ -285,6 +337,19 @@ def vault_secret(service: str, key_id: str, kind: str = "key",
         vault = Vault(service)
         info = vault.info(key_id)
         return vault.secret(key_id) if info is not None and info.kind == kind else None
+    except (VaultError, OSError) as e:
+        (log or logging.getLogger(__name__)).warning("Key vault unavailable: %s", e)
+        return None
+
+
+def vault_account(service: str, key_id: str,
+                  log: Optional[logging.Logger] = None) -> Optional[dict]:
+    """`service`'s account `key_id` as {field: secret}, else None: absent, another kind, a bad
+    id, or the vault is unusable (logged on `log`, without a secret)."""
+    if not KEY_ID_RE.match(key_id or ""):
+        return None
+    try:
+        return Vault(service).account(key_id)
     except (VaultError, OSError) as e:
         (log or logging.getLogger(__name__)).warning("Key vault unavailable: %s", e)
         return None

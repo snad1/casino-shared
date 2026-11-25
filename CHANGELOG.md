@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.12.0 - account entries in the vault (2026-11-25)
+
+- `core/vault.py`: a new kind `account` holds the named secrets of one casino login (Stake's access token, lockdown token and browser cookie) as one entry. `Vault.put_account(key_id, fields, label, primary)` stores them, with `last4` taken from the `primary` field; `Vault.account(key_id)` and `vault_account(service, key_id, log)` read them back, and return None for any other kind. `check_account(fields, names)` refuses a missing or extra field, a value that isn't printable text on one line and an entry over 16 KB (`ACCOUNT_MAX`); the message names the field, never the value. `put(..., kind="account")` is refused, and `vault_secret` never returns an account. The other kinds keep their 4096-character limit.
+
+**Tests**: `tests/test_core_vault.py` (round trip, `last4`, kinds kept apart, refusals without the values).
+
 ## v0.11.0 - lane accounts and secret checks (2026-11-25)
 
 - `core/lanes.py`: `lane_account(cfg, lane, forbidden, default_key)` gives the key, currency, proxy and vault proxy a lane bets with; `account_lanes(...)` counts the enabled lanes on the same key and currency. `lane_config` now divides the bet split by `account_lanes`, so lanes on different accounts never share a split. For a bot where key and currency can't differ per lane the result is the same as before. Moved from WolfBet.

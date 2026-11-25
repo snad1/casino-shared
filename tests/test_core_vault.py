@@ -223,3 +223,55 @@ def test_good_secrets_pass():
     check_secret(SECRET)
     check_secret("12345:" + "a" * 35, "telegram")
     check_secret("socks5://user:pw@10.0.0.2:1080", "proxy")
+
+
+# ── account entries ─────────────────────────────────────────────────────
+
+ACCOUNT = {"access_token": "acc-0123456789abcdef9f3c", "lockdown_token": "lock-0123456789",
+           "cookie": "session=abc; cf_clearance=xyz-123; locale=en"}
+
+
+def test_an_account_round_trips_and_shows_the_primary_last4(vault):
+    info = vault.put_account("friend-a", ACCOUNT, "Friend A", primary="access_token")
+    assert (info.kind, info.last4) == ("account", "9f3c")
+    assert vault.account("friend-a") == ACCOUNT
+    raw = open(os.path.join(vault.dir, "friend-a.json")).read()
+    assert all(v not in raw for v in ACCOUNT.values())
+    assert [k.key_id for k in vault.keys()] == ["friend-a"]
+
+
+def test_an_account_is_never_read_as_another_kind(vault, monkeypatch, tmp_path):
+    from shared.core import vault as vault_mod
+    vault.put_account("friend-a", ACCOUNT, "x", primary="access_token")
+    vault.put("plain", SECRET, "x")
+    assert vault.account("plain") is None and vault.account("nobody") is None
+    monkeypatch.setenv("CASINO_VAULT_DIR", vault.root)
+    monkeypatch.setenv("CASINO_VAULT_KEY_FILE", vault.kek_path)
+    assert vault_mod.vault_secret("wolfbet", "friend-a") is None
+    assert vault_mod.vault_account("wolfbet", "friend-a") == ACCOUNT
+    assert vault_mod.vault_account("wolfbet", "plain") is None
+
+
+def test_a_put_of_kind_account_must_use_put_account(vault):
+    with pytest.raises(VaultError):
+        vault.put("friend-a", SECRET, "x", kind="account")
+
+
+@pytest.mark.parametrize("fields", [
+    {**ACCOUNT, "cookie": "line one\nline two"},
+    {**ACCOUNT, "cookie": "x" * 17000},
+    {**ACCOUNT, "access_token": ""},
+    {**ACCOUNT, "Bad-Name": "v"},
+])
+def test_a_bad_account_is_refused_without_its_values(vault, fields):
+    with pytest.raises(VaultError) as e:
+        vault.put_account("friend-a", fields, "x", primary="access_token")
+    assert all(v not in str(e.value) for v in fields.values() if len(v) > 4)
+    assert vault.info("friend-a") is None
+
+
+def test_check_account_wants_exactly_the_named_fields():
+    from shared.core.vault import check_account
+    check_account(ACCOUNT, ["access_token", "lockdown_token", "cookie"])
+    with pytest.raises(ValueError):
+        check_account({"access_token": "x"}, ["access_token", "lockdown_token", "cookie"])
