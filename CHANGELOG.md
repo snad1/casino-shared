@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.13.0 - Telegram lane commands for every bot (2026-11-26)
+
+- `tg/lanes.py`: the Telegram lane commands, moved from WolfBet so every bot shares one copy: `/lanes` with one-lane buttons (pause, resume, restart now or at session end, stop, start, remove now or at session end), `/laneadd NAME [from K]`, `/lanerename K NAME`, the key and proxy picker and `/sessions [lane]` with paging and a session detail. A bot builds `LaneCommands(LaneSite(service, ctl_name, ctl_path, is_owner, app_env, key_label, dashboard_page, logger))`, registers `cmd_lanes`, `cmd_laneadd`, `cmd_lanerename` and `cmd_sessions`, and sends its buttons through `handle_callback(query)`, which returns False for any other button.
+- Every command and button checks the owner first; every change runs the bot's own ctl as an argv list (never a shell) with a timeout and answers with the ctl's own line. The picker reads the bot's vault for label and last 4 only and never a secret.
+- Plain helpers for the bots and their tests: `format_lanes`, `format_cli_session_line`, `format_cli_session_detail`, `lane_buttons`, `lane_name_ok`, `default_key_label`, `LANE_NAME_RULE`.
+- New optional extra `casino-shared[tg]` (`python-telegram-bot>=20`); only the Telegram bots import `shared.tg.lanes`.
+
+**Tests**: `tests/test_tg_lanes.py` (a non-WolfBet bot: owner gate on commands and buttons, its own ctl and argv, its own vault and no secret read, sessions and `no_database`, no link without a dashboard, other buttons left to the bot).
+
 ## v0.12.0 - account entries in the vault (2026-11-25)
 
 - `core/vault.py`: a new kind `account` holds the named secrets of one casino login (Stake's access token, lockdown token and browser cookie) as one entry. `Vault.put_account(key_id, fields, label, primary)` stores them, with `last4` taken from the `primary` field; `Vault.account(key_id)` and `vault_account(service, key_id, log)` read them back, and return None for any other kind. `check_account(fields, names)` refuses a missing or extra field, a value that isn't printable text on one line and an entry over 16 KB (`ACCOUNT_MAX`); the message names the field, never the value. `put(..., kind="account")` is refused, and `vault_secret` never returns an account. The other kinds keep their 4096-character limit.
