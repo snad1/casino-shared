@@ -45,13 +45,13 @@ def ctl(monkeypatch):
     return fake
 
 
-def _site(dashboard=None):
+def _site(dashboard=None, **extra):
     return lanes.LaneSite(
         service="cryptogames", ctl_name="cgctl", ctl_path=lambda: CTL,
         is_owner=lambda user_id: user_id == OWNER, app_env=lambda: "production",
         key_label=lambda ref: {"friend": "friend (...a1b2)"}.get(ref, ref),
         dashboard_page=lambda path: f"{dashboard}/{path}" if dashboard else None,
-        logger=logging.getLogger("test"))
+        logger=logging.getLogger("test"), **extra)
 
 
 def _update(user_id=OWNER, args=()):
@@ -194,3 +194,23 @@ def test_other_buttons_are_left_to_the_bot(ctl, data):
 def test_lane_names_follow_the_cli_rule():
     assert lanes.lane_name_ok("night-run") and lanes.lane_name_ok("friend A")
     assert not lanes.lane_name_ok("-x") and not lanes.lane_name_ok(" x") and not lanes.lane_name_ok("a" * 33)
+
+
+class _AccountVault(_NoSecretVault):
+    def keys(self):
+        return [types.SimpleNamespace(key_id="main", label="Stake main login", last4="9f3c", kind="account"),
+                types.SimpleNamespace(key_id="stray", label="stray", last4="0000", kind="key")]
+
+
+def test_a_bot_whose_lanes_bet_from_accounts_lists_the_accounts(ctl, monkeypatch):
+    monkeypatch.setattr(vault, "Vault", _AccountVault)
+    monkeypatch.setattr(vault, "vault_info", lambda service, ref, log=None: types.SimpleNamespace(
+        key_id=ref, label="Stake main login", last4="9f3c", kind="account"))
+    cmds = lanes.LaneCommands(_site(key_kind="account"))
+    q = _query("lane:key:2")
+    asyncio.run(cmds.handle_callback(q))
+    assert _buttons(q.edits[-1][1]["reply_markup"]) == [
+        ("Stake main login (...9f3c)", "lanepick:key:2:main"), ("Cancel", "lanes_refresh")]
+    q = _query("lanepick:key:2:main")
+    asyncio.run(cmds.handle_callback(q))
+    assert q.edits[-1][0] == "Use Stake main login (...9f3c) on lane 2? Lane 2 restarts."

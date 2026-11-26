@@ -302,6 +302,7 @@ class LaneSite:
     key_label: Callable[[str], str]                 # `label (...last4)` for a key id
     dashboard_page: Callable[[str], Optional[str]]  # a dashboard page URL, or None when unset
     logger: object
+    key_kind: str = "key"                           # the vault kind a lane's key_ref names
 
 
 def default_key_label(service: str, key_ref: str, log=None) -> str:
@@ -452,17 +453,22 @@ class LaneCommands:
             return
         await self._edit_lanes(query, await self._run_lane_action(action, k))
 
+    def _vault_kind(self, kind: str) -> str:
+        """The vault kind behind a picker kind: a bot may keep a lane's key as an account."""
+        return self.site.key_kind if kind == "key" else kind
+
     def _vault_entries(self, kind: str) -> list:
         """(id, `label (...last4)`) for every saved entry of `kind`; never a secret."""
         from shared.core import vault
+        want = self._vault_kind(kind)
         return [(info.key_id, vault_label(info)) for info in vault.Vault(self.site.service).keys()
-                if info.kind == kind]
+                if info.kind == want]
 
     def _vault_entry(self, kind: str, ref: str):
         """`label (...last4)` of saved entry `ref` when it is of `kind`, else None."""
         from shared.core import vault
         info = vault.vault_info(self.site.service, ref, log=self._log)
-        return vault_label(info) if info is not None and info.kind == kind else None
+        return vault_label(info) if info is not None and info.kind == self._vault_kind(kind) else None
 
     def _account_label(self, kind: str, ref):
         """The name to show for `ref` (None: no proxy), or None when the vault no longer has it."""
