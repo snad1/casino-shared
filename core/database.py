@@ -1,4 +1,4 @@
-"""Common database utilities — connection, cleanup, security.
+"""Common database utilities: connection, cleanup, security.
 
 Each bot's core/database.py imports these and defines its own init_db
 with bot-specific bets table schema.
@@ -53,11 +53,12 @@ def ensure_sessions_lane(conn) -> None:
         conn.execute("ALTER TABLE sessions ADD COLUMN lane INTEGER DEFAULT 1")
 
 
-def cleanup_old_bets(db_path: str, bet_age_days: int = 3):
+def cleanup_old_bets(db_path: str, bet_age_days: int = 3, vacuum: bool = True):
     """Delete bet rows for ended sessions older than bet_age_days.
 
     Session rows (with all pre-aggregated stats) are kept forever.
     Only the individual bet detail rows are purged to reclaim disk space.
+    `vacuum=False` skips the file rewrite, for a bot whose other processes are writing.
     """
     conn = sqlite3.connect(db_path, timeout=10)
     c = conn.cursor()
@@ -89,7 +90,7 @@ def cleanup_old_bets(db_path: str, bet_age_days: int = 3):
 
     conn.commit()
 
-    if deleted > 0:
+    if deleted > 0 and vacuum:
         conn.execute("VACUUM")
 
     conn.close()
@@ -113,6 +114,40 @@ def cleanup_live_bets(db_path: str, bet_age_days: int = 1):
         conn.execute("VACUUM")
     conn.close()
     return deleted
+
+
+PURGE_BATCH = 5000
+
+
+def purge_live_bets(db_path: str, bet_age_days: int = 1, batch: int = PURGE_BATCH) -> int:
+    """Delete bet rows older than bet_age_days in short transactions, for a running bot.
+
+    `cleanup_live_bets` deletes in one transaction and then VACUUMs, which rewrites the whole
+    file under the write lock; other processes writing the same database meanwhile fail with
+    "database is locked". Here each batch commits on its own and nothing is rewritten:
+    SQLite reuses the freed pages.
+    """
+    cutoff = (f"-{bet_age_days} days",)
+    deleted = 0
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        while True:
+            count = conn.execute(
+                """
+                DELETE FROM bets WHERE id IN (
+                    SELECT id FROM bets
+                    WHERE REPLACE(timestamp, 'T', ' ') < datetime('now', ?)
+                    LIMIT ?
+                )
+                """,
+                (*cutoff, batch),
+            ).rowcount
+            conn.commit()
+            deleted += count
+            if count < batch:
+                return deleted
+    finally:
+        conn.close()
 
 
 def db_connect(db_path: str):

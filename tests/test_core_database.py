@@ -1,4 +1,4 @@
-"""Tests for shared/core/database.py — DB utilities."""
+"""Tests for shared/core/database.py: DB utilities."""
 
 import os
 import sqlite3
@@ -6,8 +6,9 @@ import sqlite3
 import pytest
 
 from shared.core.database import (
-    SESSIONS_SCHEMA, cleanup_old_bets, db_connect, secure_path,
+    SESSIONS_SCHEMA, cleanup_old_bets, db_connect, purge_live_bets, secure_path,
 )
+from unittest import mock
 
 
 def _init_test_db(db_path):
@@ -142,3 +143,63 @@ class TestCleanupOldBets:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
         assert "bets_purged" in cols
         conn.close()
+
+
+class TestPurgeLiveBets:
+    @staticmethod
+    def _bets(db_path, stamps):
+        conn = _init_test_db(db_path)
+        conn.executemany(
+            "INSERT INTO bets (session_id, timestamp, amount, state, profit, balance_after)"
+            " VALUES (1, ?, 0.001, 'win', 0.001, 1.0)",
+            [(t,) for t in stamps],
+        )
+        conn.commit()
+        conn.close()
+
+    def test_deletes_old_rows_in_batches_and_keeps_new_ones(self, tmp_db):
+        self._bets(tmp_db, ["2020-01-01T00:00:00"] * 7 + ["2999-01-01T00:00:00"] * 2)
+        assert purge_live_bets(tmp_db, bet_age_days=1, batch=3) == 7
+        conn = sqlite3.connect(tmp_db)
+        assert conn.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 2
+        conn.close()
+
+    def test_never_vacuums(self, tmp_db):
+        self._bets(tmp_db, ["2020-01-01T00:00:00"] * 3)
+        seen = []
+        real = sqlite3.connect
+
+        def tracing(*args, **kwargs):
+            conn = real(*args, **kwargs)
+            conn.set_trace_callback(seen.append)
+            return conn
+
+        with mock.patch("shared.core.database.sqlite3.connect", tracing):
+            purge_live_bets(tmp_db, bet_age_days=1, batch=2)
+        assert seen and not any("VACUUM" in sql.upper() for sql in seen)
+
+
+class TestCleanupOldBetsVacuum:
+    def test_vacuum_false_skips_the_rewrite(self, tmp_db):
+        conn = _init_test_db(tmp_db)
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, ended_at) VALUES (1, ?, ?)",
+            ("2020-01-01T00:00:00", "2020-01-01T01:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO bets (session_id, timestamp, amount, state, profit, balance_after)"
+            " VALUES (1, '2020-01-01T00:30:00', 0.001, 'win', 0.001, 1.0)"
+        )
+        conn.commit()
+        conn.close()
+        seen = []
+        real = sqlite3.connect
+
+        def tracing(*args, **kwargs):
+            conn = real(*args, **kwargs)
+            conn.set_trace_callback(seen.append)
+            return conn
+
+        with mock.patch("shared.core.database.sqlite3.connect", tracing):
+            assert cleanup_old_bets(tmp_db, bet_age_days=1, vacuum=False) == 1
+        assert not any("VACUUM" in sql.upper() for sql in seen)

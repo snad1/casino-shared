@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.14.0 - bet purge that never locks a running bot out (2026-11-27)
+
+- `core/database.py`: new `purge_live_bets(db_path, bet_age_days=1, batch=5000)`. It deletes bet rows older than the cutoff in short transactions and never runs `VACUUM`, so other processes writing the same database (one per lane) are not refused with `database is locked`. Freed pages are reused by SQLite.
+- `cleanup_old_bets(..., vacuum=True)`: `vacuum=False` skips the file rewrite. The default keeps today's behaviour for every bot.
+- `cleanup_live_bets` is unchanged.
+
+**Tests**: `tests/test_core_database.py` (batches delete only old rows and keep new ones; no VACUUM in `purge_live_bets` or in `cleanup_old_bets(vacuum=False)`).
+
 ## v0.13.0 - Telegram lane commands for every bot (2026-11-26)
 
 - `tg/lanes.py`: the Telegram lane commands, moved from WolfBet so every bot shares one copy: `/lanes` with one-lane buttons (pause, resume, restart now or at session end, stop, start, remove now or at session end), `/laneadd NAME [from K]`, `/lanerename K NAME`, the key and proxy picker and `/sessions [lane]` with paging and a session detail. A bot builds `LaneCommands(LaneSite(service, ctl_name, ctl_path, is_owner, app_env, key_label, dashboard_page, logger))`, registers `cmd_lanes`, `cmd_laneadd`, `cmd_lanerename` and `cmd_sessions`, and sends its buttons through `handle_callback(query)`, which returns False for any other button.
